@@ -1,47 +1,10 @@
-#ifndef __MY_LIB__
-#define __MY_LIB__
+#ifndef __MYLIB_H__
+#define __MYLIB_H__
+
+#include "syscall.h"
 
 #include <cstddef>
-
-#define MAXARGS 10
-
-struct cmd {
-    int type;
-};
-
-struct execcmd {
-    int type;
-    char *argv[MAXARGS], *eargv[MAXARGS];
-};
-
-struct redircmd {
-    int type, fd, mode;
-    char *file, *efile;
-    struct cmd* cmd;
-};
-
-struct pipecmd {
-    int type;
-    struct cmd *left, *right;
-};
-
-struct listcmd {
-    int type;
-    struct cmd *left, *right;
-};
-
-struct backcmd {
-    int type;
-    struct cmd* cmd;
-};
-
-struct cmd* parsecmd(char*);
-
-// System call vector structure for writev
-// struct iovec {
-//     void*  iov_base;
-//     size_t iov_len;
-// };
+#include <fcntl.h>
 
 // Minimum runtime library
 inline size_t strlen(const char* s) {
@@ -50,6 +13,32 @@ inline size_t strlen(const char* s) {
         ++len;
     return len;
 }
+
+void print(const char* s, ...) {
+    va_list ap;
+    va_start(ap, s);
+    struct iovec vecs[16];
+    size_t count = 0;
+    while (s && count < 16) {
+        vecs[count].iov_base = (void*)s;
+        vecs[count].iov_len = strlen(s);
+        count++;
+        s = va_arg(ap, const char*);
+    }
+    va_end(ap);
+
+    if (count > 0)
+        syscall(SYS_writev, 2, vecs, count);
+}
+
+#define assert(cond)                                                                                                   \
+    do {                                                                                                               \
+        if (!(cond)) {                                                                                                 \
+            print("Panicked.\n", nullptr);                                                                             \
+            syscall(SYS_exit, 1);                                                                                      \
+        }                                                                                                              \
+    } while (0)
+
 inline char* strchr(const char* s, int c) {
     for (; *s; ++s) {
         if (*s == c)
@@ -137,13 +126,13 @@ inline void* memset(void* s, int c, size_t n) {
 inline size_t strspn(const char* s, const char* accept) {
     const char* p = s;
     while (*p && strchr(accept, *p))
-        p++;
+        ++p;
     return p - s;
 }
 inline size_t strcspn(const char* s, const char* reject) {
     const char* p = s;
     while (*p && !strchr(reject, *p))
-        p++;
+        ++p;
     return p - s;
 }
 inline char* strtok_r(char* str, const char* delim, char** saveptr) {
@@ -168,4 +157,4 @@ inline char* strtok(char* str, const char* delim) {
     return strtok_r(str, delim, &saved);
 }
 
-#endif // __MY_LIB__
+#endif // __MYLIB_H__

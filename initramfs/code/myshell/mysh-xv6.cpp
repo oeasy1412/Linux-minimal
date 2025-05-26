@@ -1,55 +1,20 @@
 // Linux port of xv6-riscv shell in C++ (no libc)
-// gcc -g -O2 -c -ffreestanding -fno-exceptions -nostdlib mysh-xv6.cpp
+// gcc -g -O2 -c -ffreestanding -nostdlib -fno-exceptions mysh-xv6.cpp
 // ld mysh-xv6.o -o mysh
 
+#include "history.h"
 #include "mylib.h"
+#include "mysh.h"
 #include "termios.h"
-
-#include <fcntl.h>
-#include <stdarg.h>
-#include <sys/syscall.h>
 
 // Parsed command representation
 enum { EXEC = 1, REDIR = 2, PIPE = 3, LIST = 4, BACK = 5 };
-
-// 历史记录
-#define MAX_HISTORY 50
-static char* history[MAX_HISTORY];
-static int hist_count = 0; // 实际存储的历史数量
-static int hist_pos = -1;  // 当前显示的历史索引
-static int edit_pos = 0;   // 当前编辑位置
-static char temp_buf[256]; // 保存当前未提交的输入
 
 // my var
 char** environ = nullptr; // 全局环境变量表指针
 const char* path;
 
-void print(const char* s, ...) {
-    va_list ap;
-    va_start(ap, s);
-    struct iovec vecs[16];
-    size_t count = 0;
-    while (s && count < 16) {
-        vecs[count].iov_base = (void*)s;
-        vecs[count].iov_len = strlen(s);
-        count++;
-        s = va_arg(ap, const char*);
-    }
-    va_end(ap);
-
-    if (count > 0)
-        syscall(SYS_writev, 2, vecs, count);
-}
-
-#define assert(cond)                                                                                                   \
-    do {                                                                                                               \
-        if (!(cond)) {                                                                                                 \
-            print("Panicked.\n", nullptr);                                                                             \
-            syscall(SYS_exit, 1);                                                                                      \
-        }                                                                                                              \
-    } while (0)
-
-static char mem[4096], *freem = mem;
+static char mem[40960], *freem = mem;
 
 void* zalloc(size_t sz) {
     freem = (char*)(((__intptr_t)freem + 7) & ~(__intptr_t)7);
@@ -58,9 +23,30 @@ void* zalloc(size_t sz) {
     freem += sz;
     return ret;
 }
+void free(void* ptr) {
+    // 简单实现不回收内存，实际需要根据内存管理器设计
+}
 char* strdup_z(const char* s) {
+    if (!s) {
+        return nullptr;
+    }
     char* p = static_cast<char*>(zalloc(strlen(s) + 1));
     return strcpy(p, s);
+}
+void* memmove_z(void* dest, const void* src, size_t n) {
+    unsigned char* d = static_cast<unsigned char*>(dest);
+    const unsigned char* s = static_cast<const unsigned char*>(src);
+    if (d < s) {
+        for (size_t i = 0; i < n; ++i) {
+            d[i] = s[i];
+        }
+    } else if (d > s) {
+        for (size_t i = n; i > 0;) {
+            --i;
+            d[i] = s[i];
+        }
+    }
+    return dest;
 }
 
 char* getcwd(char* buf, size_t size) { return (syscall(SYS_getcwd, buf, size) >= 0) ? buf : nullptr; }
@@ -181,19 +167,16 @@ void runcmd(struct cmd* cmd) {
 }
 
 int getcmd(char* buf, int nbuf) {
-    struct termios orig_termios, new_termios;
-    // 保存并修改终端设置
-    syscall(SYS_ioctl, 0, 0x5401 /*TCGETS*/, &orig_termios);
-    new_termios = orig_termios;
-    new_termios.c_lflag &= ~(ICANON | ECHO);
-    syscall(SYS_ioctl, 0, 0x5402 /*TCSETS*/, &new_termios);
+    // struct termios orig_termios, new_termios;
+    // // 保存终端设置
+    // syscall(SYS_ioctl, 0, TCGETS, &orig_termios);
+    // new_termios = orig_termios;
+    // new_termios.c_lflag &= ~(ICANON | ECHO);
+    // new_termios.c_cc[VMIN] = 1;
+    // new_termios.c_cc[VTIME] = 0;
+    // syscall(SYS_ioctl, 0, TCSETS, &new_termios);
 
-    char input_buf[3]; // 输入缓冲区（考虑ESC序列）
-    int esc_state = 0; // ESC状态机：0-正常 1-ESC 2-[
-
-    // 初始化编辑状态 // memset(buf, 0, nbuf);
-    edit_pos = 0;
-    hist_pos = -1;
+    // enable_raw_mode();
 
     char cwd[256];
     if (getcwd(cwd, sizeof(cwd))) {
@@ -201,26 +184,53 @@ int getcmd(char* buf, int nbuf) {
     } else {
         print("? > ", nullptr);
     }
-    char* pos = buf;
-    int total_read = 0;
-
-    while (total_read < nbuf - 1) {
-        int remaining = nbuf - 1 - total_read;
-        int nread = syscall(SYS_read, 0, pos, remaining);
-        if (nread <= 0)
-            return -1;
-
-        char* nl = memchr(pos, '\n', nread);
-        if (nl) {
-            *nl = '\0';
-            return 0;
+    // 初始化编辑状态
+    memset(buf, 0, nbuf);
+    int esc_state = 0; // ESC状态机：0-正常 1-ESC 2-[
+    edit_pos = 0;
+    hist_pos = -1;
+    while (true) {
+        char ch;
+        int nread = syscall(SYS_read, 0, &ch, 1); // 单字符读取
+        if (nread <= 0) {
+            buf[0] = '\0';
+            break;
+        }
+        // ESC序列处理
+        if (esc_state != 0) {
+            if (esc_state == 1 && ch == '[') {
+                esc_state = 2;
+            } else if (esc_state == 2) {
+                esc_state = 0;
+                handle_arrow(ch, buf, nbuf, cwd);
+            } else {
+                esc_state = 0;
+            }
+            continue;
         }
 
-        pos += nread;
-        total_read += nread;
+        if (ch == 0x1B) { // ESC
+            esc_state = 1;
+        } else if (ch == '\n') { // 提交命令
+            if (edit_pos > 0) {
+                // 添加历史记录
+                if (hist_count >= MAX_HISTORY) {
+                    free(history[0]);
+                    memmove_z(history, history + 1, (MAX_HISTORY - 1) * sizeof(char*));
+                    hist_count--;
+                }
+                history[hist_count++] = strdup_z(buf);
+            }
+            break;
+        } else if (ch >= 32 && ch < 127) { // 可打印字符
+            if (edit_pos < nbuf - 1) {
+                buf[edit_pos++] = ch;
+                buf[edit_pos] = '\0';
+            }
+        }
     }
-
-    buf[nbuf - 1] = '\0';
+    // 恢复终端设置
+    // syscall(SYS_ioctl, 0, TCSETS, &orig_termios);
     return 0;
 }
 
@@ -234,26 +244,22 @@ extern "C" void c_start(long* stack_ptr) {
     path = getenv("PATH");
     print("Welcome to use mysh, an unfriendly self-developed shell\n$PATH=", path, "\n", nullptr);
 
-    if (environ == nullptr)
-        print("Environment is empty.\n", nullptr);
-
     static char buf[100];
-
     while (getcmd(buf, sizeof(buf)) >= 0) {
         if (buf[0] == 'c' && buf[1] == 'd' && buf[2] == ' ') {
-            char* path = buf + 3;
-            if (*path == '\0') {
-                char* HOME = getenv("HOME");
+            char* cdpath = buf + 3;
+            if (*cdpath == '\0') {
+                /*static*/ char* HOME = getenv("HOME");
                 if (HOME) {
-                    path = const_cast<char*>(HOME);
+                    cdpath = const_cast<char*>(HOME);
                 } else {
                     print("cd: no HOME directory\n", nullptr);
                     continue;
                 }
             }
             // Chdir must be called by the parent
-            if (syscall(SYS_chdir, path) < 0)
-                print("cannot cd ", path, "\n", nullptr);
+            if (syscall(SYS_chdir, cdpath) < 0)
+                print("cannot cd ", cdpath, "\n", nullptr);
             continue;
         }
         if (syscall(SYS_fork) == 0)
@@ -269,78 +275,6 @@ __asm__(
     "_start:\n"
     "mov %rsp, %rdi\n" // 将原始栈指针作为参数传递
     "jmp c_start\n");
-
-void save_current(char* buf, int max_len) {
-    int len = strlen(buf);
-    len = len < max_len - 1 ? len : max_len - 1;
-    memcpy(temp_buf, buf, len);
-    temp_buf[len] = '\0';
-}
-// 恢复当前输入
-void restore_current(char* buf, int max_len) {
-    size_t len = strlen(temp_buf);
-    len = len < max_len - 1 ? len : max_len - 1;
-    memcpy(buf, temp_buf, len);
-    buf[len] = '\0';
-    edit_pos = len;
-}
-// 加载历史记录
-void load_history(char* buf, int max_len, int index) {
-    if (index >= 0 && index < hist_count) {
-        strncpy(buf, history[index], max_len);
-        edit_pos = strlen(history[index]);
-    }
-}
-// 重绘行
-void redraw_line(const char* buf, const char* prompt, size_t cursor_pos) {
-    // 清空行并重置光标
-    print("\033[2K\r", prompt, buf, nullptr);
-    // 定位光标
-    if (cursor_pos > 0) {
-        char seq[16];
-        size_t pos = cursor_pos + strlen(prompt);
-        print(seq, sizeof(seq), "\033[%dG", pos, nullptr);
-        print(seq, nullptr);
-    }
-}
-
-// 处理方向键
-void handle_arrow(char c, char* buf, int max_len, const char* prompt) {
-    if (c == 'A' && hist_count > 0) { // 上键
-        if (hist_pos == -1) {         // 首次按上键
-            hist_pos = hist_count - 1;
-            save_current(buf, max_len);
-        } else if (hist_pos > 0) {
-            hist_pos--;
-        }
-        load_history(buf, max_len, hist_pos);
-    } else if (c == 'B' && hist_pos != -1) { // 下键
-        if (hist_pos < hist_count - 1) {
-            hist_pos++;
-            load_history(buf, max_len, hist_pos);
-        } else {
-            hist_pos = -1;
-            restore_current(buf, max_len);
-        }
-    } else if (c == 'C') { /* 右键 */
-        if (edit_pos < strlen(buf)) {
-            edit_pos++;
-        }
-    } else if (c == 'D') { /* 左键 */
-        if (edit_pos > 0) {
-            edit_pos--;
-        }
-    }
-    redraw_line(buf, prompt, strlen(buf));
-}
-
-void handle_backspace(char* buf, const char* prompt) {
-    // if (edit_pos > 0) {
-    //     memmove(buf + edit_pos-1, buf + edit_pos, strlen(buf) - edit_pos + 1);
-    //     edit_pos--;
-    //     redraw_line(buf, prompt, edit_pos);
-    // }
-}
 
 // Constructors
 struct cmd* execcmd(void) {
@@ -393,7 +327,7 @@ struct cmd* backcmd(struct cmd* subcmd) {
     return (struct cmd*)cmd;
 }
 
-// Parsing
+// Parsing ------------------------------------------------------
 char whitespace[] = " \t\r\n\v";
 char symbols[] = "<|>&;()";
 
@@ -448,7 +382,7 @@ int gettoken(char** ps, char* es, char** q, char** eq) {
     return ret;
 }
 
-int peek(char** ps, char* es, char* toks) {
+int peek(char** ps, char* es, const char* toks) {
     char* s;
 
     s = *ps;
