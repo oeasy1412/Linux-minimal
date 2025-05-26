@@ -3,6 +3,7 @@
 // ld mysh-xv6.o -o mysh
 
 #include "mylib.h"
+#include "termios.h"
 
 #include <fcntl.h>
 #include <stdarg.h>
@@ -11,22 +12,17 @@
 // Parsed command representation
 enum { EXEC = 1, REDIR = 2, PIPE = 3, LIST = 4, BACK = 5 };
 
+// 历史记录
+#define MAX_HISTORY 50
+static char* history[MAX_HISTORY];
+static int hist_count = 0; // 实际存储的历史数量
+static int hist_pos = -1;  // 当前显示的历史索引
+static int edit_pos = 0;   // 当前编辑位置
+static char temp_buf[256]; // 保存当前未提交的输入
+
 // my var
 char** environ = nullptr; // 全局环境变量表指针
 const char* path;
-
-long syscall(int num, ...) {
-    va_list ap;
-    va_start(ap, num);
-    register long a0 asm("rax") = num;
-    register long a1 asm("rdi") = va_arg(ap, long);
-    register long a2 asm("rsi") = va_arg(ap, long);
-    register long a3 asm("rdx") = va_arg(ap, long);
-    register long a4 asm("r10") = va_arg(ap, long);
-    va_end(ap);
-    asm volatile("syscall" : "+r"(a0) : "r"(a1), "r"(a2), "r"(a3), "r"(a4) : "memory", "rcx", "r8", "r9", "r11");
-    return a0;
-}
 
 void print(const char* s, ...) {
     va_list ap;
@@ -61,6 +57,10 @@ void* zalloc(size_t sz) {
     void* ret = freem;
     freem += sz;
     return ret;
+}
+char* strdup_z(const char* s) {
+    char* p = static_cast<char*>(zalloc(strlen(s) + 1));
+    return strcpy(p, s);
 }
 
 char* getcwd(char* buf, size_t size) { return (syscall(SYS_getcwd, buf, size) >= 0) ? buf : nullptr; }
@@ -181,6 +181,20 @@ void runcmd(struct cmd* cmd) {
 }
 
 int getcmd(char* buf, int nbuf) {
+    struct termios orig_termios, new_termios;
+    // 保存并修改终端设置
+    syscall(SYS_ioctl, 0, 0x5401 /*TCGETS*/, &orig_termios);
+    new_termios = orig_termios;
+    new_termios.c_lflag &= ~(ICANON | ECHO);
+    syscall(SYS_ioctl, 0, 0x5402 /*TCSETS*/, &new_termios);
+
+    char input_buf[3]; // 输入缓冲区（考虑ESC序列）
+    int esc_state = 0; // ESC状态机：0-正常 1-ESC 2-[
+
+    // 初始化编辑状态 // memset(buf, 0, nbuf);
+    edit_pos = 0;
+    hist_pos = -1;
+
     char cwd[256];
     if (getcwd(cwd, sizeof(cwd))) {
         print("\033[38;2;102;204;255m", cwd, "\033[0m > ", nullptr);
@@ -255,6 +269,78 @@ __asm__(
     "_start:\n"
     "mov %rsp, %rdi\n" // 将原始栈指针作为参数传递
     "jmp c_start\n");
+
+void save_current(char* buf, int max_len) {
+    int len = strlen(buf);
+    len = len < max_len - 1 ? len : max_len - 1;
+    memcpy(temp_buf, buf, len);
+    temp_buf[len] = '\0';
+}
+// 恢复当前输入
+void restore_current(char* buf, int max_len) {
+    size_t len = strlen(temp_buf);
+    len = len < max_len - 1 ? len : max_len - 1;
+    memcpy(buf, temp_buf, len);
+    buf[len] = '\0';
+    edit_pos = len;
+}
+// 加载历史记录
+void load_history(char* buf, int max_len, int index) {
+    if (index >= 0 && index < hist_count) {
+        strncpy(buf, history[index], max_len);
+        edit_pos = strlen(history[index]);
+    }
+}
+// 重绘行
+void redraw_line(const char* buf, const char* prompt, size_t cursor_pos) {
+    // 清空行并重置光标
+    print("\033[2K\r", prompt, buf, nullptr);
+    // 定位光标
+    if (cursor_pos > 0) {
+        char seq[16];
+        size_t pos = cursor_pos + strlen(prompt);
+        print(seq, sizeof(seq), "\033[%dG", pos, nullptr);
+        print(seq, nullptr);
+    }
+}
+
+// 处理方向键
+void handle_arrow(char c, char* buf, int max_len, const char* prompt) {
+    if (c == 'A' && hist_count > 0) { // 上键
+        if (hist_pos == -1) {         // 首次按上键
+            hist_pos = hist_count - 1;
+            save_current(buf, max_len);
+        } else if (hist_pos > 0) {
+            hist_pos--;
+        }
+        load_history(buf, max_len, hist_pos);
+    } else if (c == 'B' && hist_pos != -1) { // 下键
+        if (hist_pos < hist_count - 1) {
+            hist_pos++;
+            load_history(buf, max_len, hist_pos);
+        } else {
+            hist_pos = -1;
+            restore_current(buf, max_len);
+        }
+    } else if (c == 'C') { /* 右键 */
+        if (edit_pos < strlen(buf)) {
+            edit_pos++;
+        }
+    } else if (c == 'D') { /* 左键 */
+        if (edit_pos > 0) {
+            edit_pos--;
+        }
+    }
+    redraw_line(buf, prompt, strlen(buf));
+}
+
+void handle_backspace(char* buf, const char* prompt) {
+    // if (edit_pos > 0) {
+    //     memmove(buf + edit_pos-1, buf + edit_pos, strlen(buf) - edit_pos + 1);
+    //     edit_pos--;
+    //     redraw_line(buf, prompt, edit_pos);
+    // }
+}
 
 // Constructors
 struct cmd* execcmd(void) {
