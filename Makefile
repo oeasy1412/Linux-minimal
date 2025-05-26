@@ -1,10 +1,33 @@
-.PHONY: initramfs run clean
+# 工具链配置
+CXX      := gcc
+LD       := ld
+CXXFLAGS := -g -O2 -ffreestanding -nostdlib -fno-exceptions -I.
 
-$(shell mkdir -p build)
+# 路径配置
+SRC_DIR  := initramfs/code
+BIN_DIR  := initramfs/bin
+OBJ_DIR  := initramfs/code/obj
+BUILD_DIR := build
 
-initramfs:
-	@cd initramfs && find . -print0 | cpio --null -ov --format=newc | gzip -9 \
-	  > ../build/initramfs.cpio.gz
+# 目标文件
+TARGET   := $(BIN_DIR)/mysh
+OBJS     := $(OBJ_DIR)/mysh-xv6.o
+
+# 编译链接
+$(OBJ_DIR)/%.o: $(SRC_DIR)/myshell/%.cpp
+	@mkdir -p $(@D)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+$(TARGET): $(OBJS)
+	@mkdir -p $(@D)
+	$(LD) $< -o $@
+
+.PHONY: initramfs run run-nographic clean
+
+# 生成 initramfs # $(shell mkdir -p build)
+initramfs: $(TARGET)
+	@mkdir -p $(BUILD_DIR)
+	cd initramfs && find . -print0 | cpio --null -ov --format=newc | gzip -9 \
+	  > ../$(BUILD_DIR)/initramfs.cpio.gz
 
 run:
 	@qemu-system-x86_64 \
@@ -13,7 +36,6 @@ run:
 	  -kernel vmlinuz \
 	  -initrd build/initramfs.cpio.gz \
 	  -append "console=ttyS0 quiet acpi=off"
-
 
 run-nographic:
 	@qemu-system-x86_64 \
@@ -25,4 +47,4 @@ run-nographic:
 	  -append "console=ttyS0 quiet acpi=off"
 
 clean:
-	@rm -rf build
+	@rm -rf $(OBJ_DIR) $(TARGET) $(BUILD_DIR)

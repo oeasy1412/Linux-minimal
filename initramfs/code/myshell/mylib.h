@@ -44,27 +44,27 @@ struct cmd* parsecmd(char*);
 // };
 
 // Minimum runtime library
-static inline size_t strlen(const char* s) {
+inline size_t strlen(const char* s) {
     size_t len = 0;
     for (; *s; ++s)
         ++len;
     return len;
 }
-static inline char* strchr(const char* s, int c) {
+inline char* strchr(const char* s, int c) {
     for (; *s; ++s) {
         if (*s == c)
             return (char*)s;
     }
     return nullptr;
 }
-static inline char* memchr(const void* s, int c, size_t n) {
+inline char* memchr(const void* s, int c, size_t n) {
     const char* p = (const char*)s;
     for (size_t i = 0; i < n; ++i)
         if (p[i] == c)
             return (char*)(p + i);
     return nullptr;
 }
-static inline int strncmp(const char* s1, const char* s2, size_t n) {
+inline int strncmp(const char* s1, const char* s2, size_t n) {
     for (size_t i = 0; i < n; ++i) {
         if (s1[i] != s2[i])
             return static_cast<unsigned char>(s1[i]) - static_cast<unsigned char>(s2[i]);
@@ -73,7 +73,7 @@ static inline int strncmp(const char* s1, const char* s2, size_t n) {
     }
     return 0;
 }
-static inline char* strcpy(char* dest, const char* src) {
+inline char* strcpy(char* dest, const char* src) {
     char* original_dest = dest;
     while (*src != '\0') {
         *dest = *src;
@@ -83,19 +83,70 @@ static inline char* strcpy(char* dest, const char* src) {
     *dest = '\0';
     return original_dest;
 }
-static inline size_t strspn(const char* s, const char* accept) {
+inline char* strncpy(char* dest, const char* src, size_t n) {
+    char* original_dest = dest;
+    size_t copied = 0;
+    while (copied < n && *src != '\0') {
+        *dest = *src;
+        ++dest;
+        ++src;
+        ++copied;
+    }
+    while (copied < n) {
+        *dest = '\0';
+        ++dest;
+        ++copied;
+    }
+
+    return original_dest;
+}
+inline void* memcpy(void* dest, const void* src, size_t n) {
+    // char* d = static_cast<char*>(dest);
+    // const char* s = static_cast<const char*>(src);
+    // char* const end = d + n;
+    // while (d != end) {
+    //     *d = *s;
+    //     ++d;
+    //     ++s;
+    // }
+    // return dest;
+    unsigned long int* d64 = static_cast<unsigned long int*>(dest);
+    const unsigned long int* s64 = static_cast<const unsigned long int*>(src);
+    while (n >= 8) {
+        *d64++ = *s64++;
+        n -= 8;
+    }
+    char* d = reinterpret_cast<char*>(d64);
+    const char* s = reinterpret_cast<const char*>(s64);
+    while (n-- > 0) {
+        *d++ = *s++;
+    }
+    return dest;
+}
+inline void* memset(void* s, int c, size_t n) {
+    char* p = static_cast<char*>(s);
+    const unsigned char uc = static_cast<unsigned char>(c);
+    char* const end = p + n;
+    while (p != end) {
+        *p = uc;
+        ++p;
+    }
+
+    return s;
+}
+inline size_t strspn(const char* s, const char* accept) {
     const char* p = s;
     while (*p && strchr(accept, *p))
         p++;
     return p - s;
 }
-static inline size_t strcspn(const char* s, const char* reject) {
+inline size_t strcspn(const char* s, const char* reject) {
     const char* p = s;
     while (*p && !strchr(reject, *p))
         p++;
     return p - s;
 }
-static inline char* strtok_r(char* str, const char* delim, char** saveptr) {
+inline char* strtok_r(char* str, const char* delim, char** saveptr) {
     char* p = str ? str : *saveptr;
     if (!p)
         return nullptr;
@@ -112,7 +163,7 @@ static inline char* strtok_r(char* str, const char* delim, char** saveptr) {
     *saveptr = end;
     return p;
 }
-static inline char* strtok(char* str, const char* delim) {
+inline char* strtok(char* str, const char* delim) {
     static char* saved;
     return strtok_r(str, delim, &saved);
 }
