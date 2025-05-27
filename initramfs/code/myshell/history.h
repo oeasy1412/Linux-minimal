@@ -16,7 +16,7 @@ static int hist_count = 0;  // 实际存储的历史数量
 static int hist_pos = -1;   // 当前显示的历史索引
 static size_t edit_pos = 0; // 当前编辑位置
 static char temp_buf[256];  // 保存当前未提交的输入
-static bool mid_edit = false;
+// static bool mid_edit = false;
 
 void save_current(char* buf, int max_len);
 void restore_current(char* buf, int max_len);
@@ -44,16 +44,25 @@ void handle_arrow(char c, char* buf, int max_len, const char* prompt) {
     } else if (c == 'C') { // 右键
         if (edit_pos < strlen(buf)) {
             edit_pos++;
-        } else {
-            mid_edit = false;
         }
     } else if (c == 'D') { // 左键
         if (edit_pos > 0) {
-            mid_edit = true;
             edit_pos--;
         }
     }
     refresh_line(buf, prompt, edit_pos);
+}
+
+// 添加历史记录
+void add_history(const char* buf) {
+    if (edit_pos > 0) {
+        if (hist_count >= MAX_HISTORY) {
+            free(history[0]);
+            memmove_z(history, history + 1, (MAX_HISTORY - 1) * sizeof(char*));
+            hist_count--;
+        }
+        history[hist_count++] = strdup_z(buf);
+    }
 }
 
 // 保存当前输入
@@ -104,9 +113,23 @@ void refresh_line(const char* buf, const char* prompt, size_t edit_pos) {
 
 // handle
 void handle_backspace(char* buf, const char* prompt) {
-    if (edit_pos > 0) {
-        memmove_z(buf + edit_pos - 1, buf + edit_pos, strlen(buf) - edit_pos + 1);
+    size_t len = strlen(buf);
+    if (edit_pos > 0 && edit_pos <= len) {
+        memmove_z(buf + edit_pos - 1, buf + edit_pos, len - edit_pos + 1);
         edit_pos--;
+        buf[len - 1] = '\0';
+    }
+    refresh_line(buf, prompt, edit_pos);
+}
+
+void handle_delete(char* buf, const char* prompt) {
+    size_t len = strlen(buf);
+    if (edit_pos < len) {
+        // 安全删除，确保不超过缓冲区
+        if (len < 256 - 1) {
+            memmove_z(buf + edit_pos, buf + edit_pos + 1, len - edit_pos);
+            buf[len - 1] = '\0';
+        }
     }
     refresh_line(buf, prompt, edit_pos);
 }
