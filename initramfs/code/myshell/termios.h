@@ -1,6 +1,7 @@
 #ifndef __TERMIOS_H__
 #define __TERMIOS_H__
 
+#include "mylib.h"
 #include "syscall.h"
 
 // 控制字符索引
@@ -43,12 +44,13 @@ enum {
 // 跨平台 termios 结构体 (需与内核头文件一致)
 #if defined(__x86_64__) || defined(__aarch64__)
 struct termios {
-    unsigned int c_iflag;   // 输入模式
-    unsigned int c_oflag;   // 输出模式
-    unsigned int c_cflag;   // 控制模式
-    unsigned int c_lflag;   // 本地模式
-    unsigned char c_line;   // 线路规程
-    unsigned char c_cc[19]; // 控制字符
+    unsigned int c_iflag;       // 输入模式
+    unsigned int c_oflag;       // 输出模式
+    unsigned int c_cflag;       // 控制模式
+    unsigned int c_lflag;       // 本地模式
+    unsigned char c_line;       // 线路规程
+    unsigned char __padding[3]; // 实际内核可能在此处填充3字节 ?
+    unsigned char c_cc[19];     // 控制字符
 };
 #else
 #error "Termios structure not defined for this arch"
@@ -59,7 +61,13 @@ static long sys_ioctl(int fd, unsigned long cmd, void* arg) { return syscall(SYS
 struct termios orig_termios;
 
 // 跨平台函数
-int tcgetattr(int fd, struct termios* t) { return sys_ioctl(fd, TCGETS, t) == 0 ? 0 : -1; }
+int tcgetattr(int fd, struct termios* t) {
+    if (sys_ioctl(fd, TCGETS, t) != 0) {
+        print("tcgetattr error", nullptr);
+        return -1;
+    }
+    return 0;
+}
 
 int tcsetattr(int fd, int opt, const struct termios* t) {
     unsigned long cmd;
@@ -83,10 +91,9 @@ void enable_raw_mode() {
     struct termios raw;
     tcgetattr(STDIN_FILENO, &orig_termios);
     raw = orig_termios;
-
-    // 关闭规范模式和回显
-    // raw.c_lflag &= ~(ICANON | ECHO);
-    raw.c_lflag &= ~(ICANON | ECHO | ISIG);
+    // 关闭规范模式、回显、信号处理
+    // raw.c_lflag &= ~(ICANON | ECHO | ISIG);
+    raw.c_lflag &= ~ICANON;
     // 设置最小读取字节数和超时
     raw.c_cc[VMIN] = 1;  // 至少读取1字节
     raw.c_cc[VTIME] = 0; // 无超时
@@ -94,32 +101,15 @@ void enable_raw_mode() {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
 
-void disable_echo_and_canonical() {
-    struct termios orig, newt;
-
-    // 获取当前终端设置
-    if (sys_ioctl(0, TCGETS, &orig) < 0) {
-        // 错误处理
-        return;
-    }
-
-    // 修改标志位
-    newt = orig;
-    newt.c_lflag &= ~(ICANON | ECHO); // 清除ICANON和ECHO位
-
-    // 应用新设置
-    if (sys_ioctl(0, TCSETS, &newt) < 0) {
-        // 错误处理
-    }
-}
+void disable_raw_mode() { tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios); }
 
 static_assert(offsetof(struct termios, c_lflag) == 12, "c_lflag offset mismatch");
-static_assert(offsetof(struct termios, c_cc) == 17, "c_cc array offset error");
+static_assert(offsetof(struct termios, c_cc) == 20, "c_cc array offset error");
 // 架构验证宏
 #if defined(__x86_64__)
-static_assert(sizeof(struct termios) == 36, "x86_64 termios size error");
+static_assert(sizeof(struct termios) == 40, "x86_64 termios size error");
 #elif defined(__aarch64__)
-static_assert(sizeof(struct termios) == 36, "ARM64 termios size error");
+static_assert(sizeof(struct termios) == 40, "ARM64 termios size error");
 #endif
 
 #endif // __TERMIOS_H__
