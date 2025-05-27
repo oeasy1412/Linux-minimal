@@ -1,6 +1,7 @@
 #ifndef __HISTORY_H__
 #define __HISTORY_H__
 
+#include "memory.h"
 #include "mylib.h"
 
 // 光标操作宏定义
@@ -15,6 +16,7 @@ static int hist_count = 0;  // 实际存储的历史数量
 static int hist_pos = -1;   // 当前显示的历史索引
 static size_t edit_pos = 0; // 当前编辑位置
 static char temp_buf[256];  // 保存当前未提交的输入
+static bool mid_edit = false;
 
 void save_current(char* buf, int max_len);
 void restore_current(char* buf, int max_len);
@@ -42,9 +44,12 @@ void handle_arrow(char c, char* buf, int max_len, const char* prompt) {
     } else if (c == 'C') { // 右键
         if (edit_pos < strlen(buf)) {
             edit_pos++;
+        } else {
+            mid_edit = false;
         }
     } else if (c == 'D') { // 左键
         if (edit_pos > 0) {
+            mid_edit = true;
             edit_pos--;
         }
     }
@@ -91,9 +96,10 @@ void refresh_line(const char* buf, const char* prompt, size_t edit_pos) {
 // handle
 void handle_backspace(char* buf, const char* prompt) {
     if (edit_pos > 0) {
-        buf[--edit_pos] = '\0';
-        refresh_line(buf, prompt, edit_pos);
+        memmove_z(buf + edit_pos - 1, buf + edit_pos, strlen(buf) - edit_pos + 1);
+        edit_pos--;
     }
+    refresh_line(buf, prompt, edit_pos);
 }
 
 #endif // __HISTORY_H__
