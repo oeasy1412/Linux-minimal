@@ -91,6 +91,15 @@ void refresh_line(const char* buf, const char* prompt, size_t edit_pos) {
     }
     // fflush(buf);
     print(buf, nullptr);
+    size_t prompt_len = 0;
+    if (prompt) {
+        prompt_len = strlen(prompt) + 3;
+    } else {
+        prompt_len = 3;
+    }
+    // 计算光标最终位置 (提示符长度 + 当前编辑位置)
+    size_t total_pos = prompt_len + edit_pos;
+    printf("\r\033[%dC", total_pos);
 }
 
 // handle
