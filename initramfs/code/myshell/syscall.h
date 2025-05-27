@@ -16,7 +16,7 @@ long syscall(int num, ...) {
     register long a0 asm("rax") = num;
     register long a1 asm("rdi") = va_arg(ap, long);
     register long a2 asm("rsi") = va_arg(ap, long);
-    register long a3 asm("rdx") = va_arg(ap, long);
+    register long a3 asm("rdx") = va_arg(ap, long); 
     register long a4 asm("r10") = va_arg(ap, long);
     va_end(ap);
     asm volatile("syscall" : "+r"(a0) : "r"(a1), "r"(a2), "r"(a3), "r"(a4) : "memory", "rcx", "r8", "r9", "r11");

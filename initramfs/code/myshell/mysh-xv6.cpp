@@ -167,16 +167,7 @@ void runcmd(struct cmd* cmd) {
 }
 
 int getcmd(char* buf, int nbuf) {
-    // struct termios orig_termios, new_termios;
-    // // 保存终端设置
-    // syscall(SYS_ioctl, 0, TCGETS, &orig_termios);
-    // new_termios = orig_termios;
-    // new_termios.c_lflag &= ~(ICANON | ECHO);
-    // new_termios.c_cc[VMIN] = 1;
-    // new_termios.c_cc[VTIME] = 0;
-    // syscall(SYS_ioctl, 0, TCSETS, &new_termios);
-
-    // enable_raw_mode();
+    enable_raw_mode(); // 进入原始模式
 
     char cwd[256];
     if (getcwd(cwd, sizeof(cwd))) {
@@ -199,7 +190,7 @@ int getcmd(char* buf, int nbuf) {
         // ESC序列处理
         if (esc_state != 0) {
             if (esc_state == 1 && ch == '[') {
-                esc_state = 2;
+                esc_state++;
             } else if (esc_state == 2) {
                 esc_state = 0;
                 handle_arrow(ch, buf, nbuf, cwd);
@@ -209,8 +200,13 @@ int getcmd(char* buf, int nbuf) {
             continue;
         }
 
-        if (ch == 0x1B) { // ESC
-            esc_state = 1;
+        if (ch >= 32 && ch < 127) { // 可打印字符
+            if (edit_pos < nbuf - 1) {
+                buf[edit_pos++] = ch;
+                buf[edit_pos] = '\0';
+            }
+        } else if (ch == 127 || ch == '\b') { // 退格
+            handle_backspace(buf, cwd);
         } else if (ch == '\n') { // 提交命令
             if (edit_pos > 0) {
                 // 添加历史记录
@@ -222,15 +218,11 @@ int getcmd(char* buf, int nbuf) {
                 history[hist_count++] = strdup_z(buf);
             }
             break;
-        } else if (ch >= 32 && ch < 127) { // 可打印字符
-            if (edit_pos < nbuf - 1) {
-                buf[edit_pos++] = ch;
-                buf[edit_pos] = '\0';
-            }
+        } else if (ch == 0x1B) { // ESC
+            esc_state = 1;
         }
     }
-    // 恢复终端设置
-    // syscall(SYS_ioctl, 0, TCSETS, &orig_termios);
+    disable_raw_mode(); // 恢复终端设置
     return 0;
 }
 

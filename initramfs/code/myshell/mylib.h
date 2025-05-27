@@ -27,8 +27,9 @@ void print(const char* s, ...) {
     }
     va_end(ap);
 
-    if (count > 0)
+    if (count > 0) {
         syscall(SYS_writev, 2, vecs, count);
+    }
 }
 
 #define assert(cond)                                                                                                   \
@@ -156,5 +157,7 @@ inline char* strtok(char* str, const char* delim) {
     static char* saved;
     return strtok_r(str, delim, &saved);
 }
+
+void fflush(const char* buf) { syscall(SYS_write, 1, buf, strlen(buf)); }
 
 #endif // __MYLIB_H__
