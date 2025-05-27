@@ -6,6 +6,17 @@
 #include <cstddef>
 #include <fcntl.h>
 
+#define LEFT    0x01
+#define PLUS    0x02
+#define SPACE   0x04
+#define ZEROPAD 0x08 // 用 0 填充,比如 %8d 在位数不足时填充前导0
+#define SIGN    0x10
+#define LARGE   0x20 // 大写标记
+
+#define is_digit(c) ((c) >= '0' && (c) <= '9')
+static int get_wid(const char** s);
+static char* number_to_string(char* str, long num, int base, int size, int type);
+
 // Minimum runtime library
 inline size_t strlen(const char* s) {
     size_t len = 0;
@@ -35,7 +46,7 @@ void print(const char* s, ...) {
 #define assert(cond)                                                                                                   \
     do {                                                                                                               \
         if (!(cond)) {                                                                                                 \
-            print("Panicked.\n", nullptr);                                                                             \
+            print("\nassert panic.\n", nullptr);                                                                       \
             syscall(SYS_exit, 1);                                                                                      \
         }                                                                                                              \
     } while (0)
@@ -159,5 +170,175 @@ inline char* strtok(char* str, const char* delim) {
 }
 
 void fflush(const char* buf) { syscall(SYS_write, 1, buf, strlen(buf)); }
+
+int vsprintf(char* out, const char* fmt, va_list ap) {
+    int len, i; // 长度
+    unsigned long num;
+    char* str;
+    char* s;
+    int flags = 0;     // 用来指示类型
+    int integer_width; // 整数的长度 如%8d, 8为精度; qualifier: h(短整)或者l(长整)
+    int base;          // 进制
+
+    for (str = out; *fmt; fmt++) {
+        // 还没有出现需要转化的常规字符
+        if (*fmt != '%') {
+            *str++ = *fmt;
+            continue;
+        }
+        flags = 0;
+    repeat:
+        fmt++; // 跳过%, 判断类型
+
+        // 第一个分支格式的判断
+        switch (*fmt) {
+        case '-':
+            flags |= LEFT;
+            goto repeat;
+        case '+':
+            flags |= PLUS;
+            goto repeat;
+        case ' ':
+            flags |= SPACE;
+            goto repeat;
+        case '0':
+            flags |= ZEROPAD;
+            goto repeat; // 补充前导 0
+        }
+
+        // 获得整数的精度
+        integer_width = -1;
+        if (is_digit(*fmt)) {
+            integer_width = get_wid(&fmt);
+        }
+
+        base = 10; // 默认基
+        switch (*fmt) {
+        // 指针
+        case 'p':
+            if (integer_width == -1) {
+                integer_width = 2 * sizeof(void*);
+                flags |= ZEROPAD;
+            }
+            *str++ = '0', *str++ = 'x';
+            str = number_to_string(str, (unsigned long)va_arg(ap, void*), 16, integer_width, flags);
+            continue;
+        // 单字符
+        case 'c':
+            *str++ = (unsigned char)va_arg(ap, int);
+            continue; // 跳到最外层的for循环
+        // 字符串
+        case 's':
+            s = va_arg(ap, char*);
+            if (!s)
+                s = nullptr;
+            len = strlen(s);
+            for (i = 0; i < len; ++i)
+                *str++ = *s++;
+            continue; // 跳到最外层的for循环
+
+        case 'o':
+            base = 8;
+            break; // break之后进入num的获取
+        case 'x':
+            base = 16;
+            break;
+        case 'd':
+            flags |= SIGN;
+        case 'u':
+            break;
+
+        default:
+            assert(0);
+            if (*fmt != '%')
+                *str++ = '%';
+            if (*fmt) {
+                *str++ = *fmt;
+            } else {
+                --fmt;
+            }
+            continue;
+        }
+
+        // 如果是整型,分两种情况:带不带符号
+        if (flags & SIGN) {
+            num = va_arg(ap, int);
+        } else {
+            num = va_arg(ap, unsigned int);
+        }
+
+        // 将数字转化为字符
+        str = number_to_string(str, num, base, integer_width, flags);
+    }
+    *str = '\0';
+    return str - out;
+}
+
+int printf(const char* fmt, ...) {
+    char out[2048];
+    va_list va;
+    va_start(va, fmt);
+    int ret = vsprintf(out, fmt, va);
+    va_end(va);
+    print(out, nullptr);
+    return ret;
+}
+
+static int get_wid(const char** s) {
+    int i = 0;
+    while (is_digit(**s)) {
+        i = i * 10 + *((*s)++) - '0';
+    }
+    return i;
+}
+static char* number_to_string(char* str, long num, int base, int size, int type) {
+    const char* dig = "0123456789abcdefghijklmnopqrstuvwxyz";
+    char c, sign, temp[70];
+    int i = 0;
+    c = (type & ZEROPAD) ? '0' : ' '; // 是否补充前导 0
+    sign = 0;
+
+    if (type & SIGN) {
+        if (num < 0) {
+            num = -num;
+            sign = '-';
+            size--;
+        } else if (type & PLUS) {
+            sign = '+';
+            size--;
+        } else if (type & SPACE) {
+            sign = ' ';
+            size--;
+        }
+    }
+
+    if (num == 0) {
+        temp[i++] = '0';
+    } else {
+        while (num != 0) {
+            temp[i++] = dig[((unsigned long)num) % (unsigned)base];
+            num = ((unsigned long)num) / (unsigned)base;
+        }
+    }
+
+    size -= i;
+
+    if (!(type & (ZEROPAD | LEFT)))
+        while (size-- > 0)
+            *str++ = ' ';
+
+    if (sign)
+        *str++ = sign;
+
+    if (!(type & LEFT))
+        while (size-- > 0)
+            *str++ = c; // 补充前导(0或者space)
+    while (i-- > 0)
+        *str++ = temp[i];
+    while (size-- > 0)
+        *str++ = ' ';
+
+    return str;
+}
 
 #endif // __MYLIB_H__
