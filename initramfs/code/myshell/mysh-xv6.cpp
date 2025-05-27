@@ -3,6 +3,7 @@
 // ld mysh-xv6.o -o mysh
 
 #include "history.h"
+#include "memory.h"
 #include "mylib.h"
 #include "mysh.h"
 #include "termios.h"
@@ -13,41 +14,6 @@ enum { EXEC = 1, REDIR = 2, PIPE = 3, LIST = 4, BACK = 5 };
 // my var
 char** environ = nullptr; // 全局环境变量表指针
 const char* path;
-
-static char mem[40960], *freem = mem;
-
-void* zalloc(size_t sz) {
-    freem = (char*)(((__intptr_t)freem + 7) & ~(__intptr_t)7);
-    assert(freem + sz < mem + sizeof(mem));
-    void* ret = freem;
-    freem += sz;
-    return ret;
-}
-void free(void* ptr) {
-    // 简单实现不回收内存，实际需要根据内存管理器设计
-}
-char* strdup_z(const char* s) {
-    if (!s) {
-        return nullptr;
-    }
-    char* p = static_cast<char*>(zalloc(strlen(s) + 1));
-    return strcpy(p, s);
-}
-void* memmove_z(void* dest, const void* src, size_t n) {
-    unsigned char* d = static_cast<unsigned char*>(dest);
-    const unsigned char* s = static_cast<const unsigned char*>(src);
-    if (d < s) {
-        for (size_t i = 0; i < n; ++i) {
-            d[i] = s[i];
-        }
-    } else if (d > s) {
-        for (size_t i = n; i > 0;) {
-            --i;
-            d[i] = s[i];
-        }
-    }
-    return dest;
-}
 
 char* getcwd(char* buf, size_t size) { return (syscall(SYS_getcwd, buf, size) >= 0) ? buf : nullptr; }
 
@@ -180,6 +146,7 @@ int getcmd(char* buf, int nbuf) {
     int esc_state = 0; // ESC状态机：0-正常 1-ESC 2-[
     edit_pos = 0;
     hist_pos = -1;
+    mid_edit = false;
     while (true) {
         char ch;
         int nread = syscall(SYS_read, 0, &ch, 1); // 单字符读取
@@ -203,7 +170,9 @@ int getcmd(char* buf, int nbuf) {
         if (ch >= 32 && ch < 127) { // 可打印字符
             if (edit_pos < nbuf - 1) {
                 buf[edit_pos++] = ch;
-                buf[edit_pos] = '\0';
+                if (!mid_edit) {
+                    buf[edit_pos] = '\0';
+                }
             }
         } else if (ch == 127 || ch == '\b') { // 退格
             handle_backspace(buf, cwd);
