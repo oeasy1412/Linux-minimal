@@ -143,7 +143,6 @@ int getcmd(char* buf, int nbuf) {
     int esc_state = 0; // ESC状态机：0-正常 1-ESC 2-[
     edit_pos = 0;
     hist_pos = -1;
-    mid_edit = false;
     while (true) {
         char ch;
         int nread = syscall(SYS_read, 0, &ch, 1); // 单字符读取
@@ -157,6 +156,13 @@ int getcmd(char* buf, int nbuf) {
                 esc_state++;
             } else if (esc_state == 2) {
                 esc_state = 0;
+                if (ch == '3') {
+                    char next_ch;
+                    if (syscall(SYS_read, 0, &next_ch, 1) > 0 && next_ch == '~') {
+                        handle_delete(buf, cwd);
+                    }
+                    continue;
+                }
                 handle_arrow(ch, buf, nbuf, cwd);
             } else {
                 esc_state = 0;
@@ -165,24 +171,19 @@ int getcmd(char* buf, int nbuf) {
         }
 
         if (ch >= 32 && ch < 127) { // 可打印字符
-            if (edit_pos < nbuf - 1) {
+            size_t len = strlen(buf);
+            if (len < nbuf - 1) { // 确保有空间插入
+                memmove_z(buf + edit_pos + 1, buf + edit_pos, len - edit_pos + 1);
                 buf[edit_pos++] = ch;
-                if (!mid_edit) {
+                if (edit_pos > len) {
                     buf[edit_pos] = '\0';
                 }
             }
+            refresh_line(buf, cwd, edit_pos);
         } else if (ch == 127 || ch == '\b') { // 退格
             handle_backspace(buf, cwd);
         } else if (ch == '\n') { // 提交命令
-            if (edit_pos > 0) {
-                // 添加历史记录
-                if (hist_count >= MAX_HISTORY) {
-                    free(history[0]);
-                    memmove_z(history, history + 1, (MAX_HISTORY - 1) * sizeof(char*));
-                    hist_count--;
-                }
-                history[hist_count++] = strdup_z(buf);
-            }
+            add_history(buf);
             break;
         } else if (ch == 0x1B) { // ESC
             esc_state = 1;
