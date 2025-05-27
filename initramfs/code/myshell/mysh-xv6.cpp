@@ -8,9 +8,6 @@
 #include "mysh.h"
 #include "termios.h"
 
-// Parsed command representation
-enum { EXEC = 1, REDIR = 2, PIPE = 3, LIST = 4, BACK = 5 };
-
 // my var
 char** environ = nullptr; // 全局环境变量表指针
 const char* path;
@@ -236,57 +233,6 @@ __asm__(
     "_start:\n"
     "mov %rsp, %rdi\n" // 将原始栈指针作为参数传递
     "jmp c_start\n");
-
-// Constructors
-struct cmd* execcmd(void) {
-    struct execcmd* cmd;
-
-    cmd = static_cast<struct execcmd*>(zalloc(sizeof(*cmd)));
-    cmd->type = EXEC;
-    return (struct cmd*)cmd;
-}
-
-struct cmd* redircmd(struct cmd* subcmd, char* file, char* efile, int mode, int fd) {
-    struct redircmd* cmd;
-
-    cmd = static_cast<struct redircmd*>(zalloc(sizeof(*cmd)));
-    cmd->type = REDIR;
-    cmd->cmd = subcmd;
-    cmd->file = file;
-    cmd->efile = efile;
-    cmd->mode = mode;
-    cmd->fd = fd;
-    return (struct cmd*)cmd;
-}
-
-struct cmd* pipecmd(struct cmd* left, struct cmd* right) {
-    struct pipecmd* cmd;
-
-    cmd = static_cast<struct pipecmd*>(zalloc(sizeof(*cmd)));
-    cmd->type = PIPE;
-    cmd->left = left;
-    cmd->right = right;
-    return (struct cmd*)cmd;
-}
-
-struct cmd* listcmd(struct cmd* left, struct cmd* right) {
-    struct listcmd* cmd;
-
-    cmd = static_cast<struct listcmd*>(zalloc(sizeof(*cmd)));
-    cmd->type = LIST;
-    cmd->left = left;
-    cmd->right = right;
-    return (struct cmd*)cmd;
-}
-
-struct cmd* backcmd(struct cmd* subcmd) {
-    struct backcmd* cmd;
-
-    cmd = static_cast<struct backcmd*>(zalloc(sizeof(*cmd)));
-    cmd->type = BACK;
-    cmd->cmd = subcmd;
-    return (struct cmd*)cmd;
-}
 
 // Parsing ------------------------------------------------------
 char whitespace[] = " \t\r\n\v";

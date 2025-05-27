@@ -2,6 +2,7 @@
 CXX      := gcc
 LD       := ld
 CXXFLAGS := -g -O2 -ffreestanding -nostdlib -fno-exceptions -I.
+DEPFLAGS = -MT $@ -MMD -MP -MF $(OBJ_DIR)/$*.d
 
 # 路径配置
 SRC_DIR  := initramfs/code
@@ -12,11 +13,17 @@ BUILD_DIR := build
 # 目标文件
 TARGET   := $(BIN_DIR)/mysh
 OBJS     := $(OBJ_DIR)/mysh-xv6.o
+DEPS     := $(OBJS:.o=.d)
+
+-include $(DEPS)
+
+.PHONY: default
+default: initramfs
 
 # 编译链接
 $(OBJ_DIR)/%.o: $(SRC_DIR)/myshell/%.cpp
 	@mkdir -p $(@D)
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(DEPFLAGS) -c $< -o $@
 $(TARGET): $(OBJS)
 	@mkdir -p $(@D)
 	$(LD) $< -o $@
@@ -48,3 +55,12 @@ run-nographic:
 
 clean:
 	@rm -rf $(OBJ_DIR) $(TARGET) $(BUILD_DIR)
+
+.PHONY: help
+help:
+	@echo "可用目标:"
+	@echo "  make               等同于 make initramfs"
+	@echo "  make initramfs     构建初始化内存盘"
+	@echo "  make run           启动 QEMU (图形界面)"
+	@echo "  make run-nographic 启动 QEMU (无图形界面)"
+	@echo "  make clean         清理构建文件"
