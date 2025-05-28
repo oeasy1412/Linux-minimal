@@ -61,6 +61,12 @@ void add_history(const char* buf) {
             memmove_z(history, history + 1, (MAX_HISTORY - 1) * sizeof(char*));
             hist_count--;
         }
+        if (hist_count != 0) {
+            const char* last = history[hist_count - 1];
+            if (strncmp(last, buf, strlen(buf)) == 0) {
+                return; // 内容不同才添加
+            }
+        }
         history[hist_count++] = strdup_z(buf);
     }
 }

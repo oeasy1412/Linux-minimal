@@ -14,14 +14,14 @@ readonly RESET='\033[0m'
 # 进度条函数（更高效的实现）
 show_progress() {
     local i filled empty
-    i=0
+    i=1
     bars="🕐 🕑 🕒 🕓 🕔 🕕 🕖 🕗 🕘 🕙 🕚 🕛"
     # bars="- \ | /"  # ASCII回退
     # while [ $i -le $PROGRESS_LENGTH ]; do
     for emoji in $bars; do
         filled=$(/bin/busybox printf "%-${i}s" | /bin/busybox tr ' ' '=')
         empty=$((PROGRESS_LENGTH - i))
-        /bin/busybox printf "\r⏳Initializing system... [${GREEN}%s>${RESET}%-${empty}s]%s" "$filled" "" "$emoji"
+        /bin/busybox printf "\r⏳Initializing system... [${GREEN}%s>${RESET}%-${empty}s]%s " "$filled" "" "$emoji"
         
         /bin/busybox sleep "$DELAY"
         i=$((i + 1))
