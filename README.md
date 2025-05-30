@@ -13,3 +13,5 @@ make run-nographic # 以无图形化模式运行打包文件
 
 ### demo show 
 ![demo](images/demo.png)
+
+> P.S. 现阶段实现了 `mysh -nostdlib` 和 `mysh in cpp` 的两份 shell ，实现了 **环境变量 历史记录 命令解析器 管道 重定向** 等操作，可以在 Makefile 中查看并选择启动项。
