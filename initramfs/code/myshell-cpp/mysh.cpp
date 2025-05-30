@@ -216,8 +216,9 @@ class Shell {
     HistoryManager& history;
     std::vector<std::string> path_dirs;
     std::string current_prompt;
-    std::string buf;
+    std::string buf, temp_buf;
     size_t edit_pos = 0;
+    int hist_index = -1;
     typename std::list<HistoryManager::Node*>::iterator history_pos;
 
   public:
@@ -298,25 +299,29 @@ class Shell {
 
     // impl_history
     void navigate_history(bool up) {
-        const auto& hist_list = history.get_history();
-        static size_t index = 0;
+        const std::vector<std::string>& hist_list = history.get_history();
         if (up) {
-            if (index < hist_list.size()) {
-                buf = hist_list[index++];
-                edit_pos = buf.size();
+            if (hist_index == -1) { // 首次按上键
+                temp_buf = buf;
+            }
+            if (hist_index + 1 < hist_list.size()) {
+                buf = hist_list[++hist_index];
             }
         } else {
-            if (index > 0) {
-                buf = hist_list[--index];
-                edit_pos = buf.size();
+            if (hist_index > 0) {
+                buf = hist_list[--hist_index];
+            } else {
+                buf = temp_buf;
+                hist_index = -1;
             }
         }
+        edit_pos = buf.size();
     }
 
     // input_loop
     void process_input() {
         buf.clear();
-        edit_pos = 0;
+        edit_pos = 0, hist_index = -1;
         bool brk = false;
         while (!brk) {
             char ch;
@@ -330,15 +335,11 @@ class Shell {
             case 0x1B: // ESC
                 handle_escape_sequence();
                 break;
-            case '\n'/* | '\r'*/: // Enter
+            case '\n' /* | '\r'*/: // Enter
                 handle_commit();
                 brk = true;
                 break;
             case '\t':
-                break;
-            case 0x03: // Ctrl+C
-                handle_ctrl_c();
-                brk = true;
                 break;
             default:
                 if (isprint(ch)) {
@@ -422,13 +423,31 @@ class Shell {
     }
     void handle_commit() {
         if (!buf.empty()) {
-            history.add_command(buf, path_dirs);
+            history.add_command(buf, current_prompt);
         }
     }
-    void handle_ctrl_c() {
-        std::cout << "^C\n";
-        buf.clear();
-        redisplay();
+    friend void handle_sigint(int sig, Shell* shell);
+    void handle_ctrl_left_arrow() { // UTF-8 感知的光标移动
+        if (edit_pos > 0) {
+            // 回退到上一个UTF-8字符的起始位置
+            do {
+                edit_pos--;
+            } while (edit_pos > 0 && (buf[edit_pos] & 0xC0) == 0x80);
+            redisplay();
+        }
+    }
+    void handle_ctrl_backspace() { // UTF-8 感知的删除
+        if (edit_pos > 0) {
+            size_t delete_start = edit_pos;
+            // 找到字符起始位置
+            do {
+                delete_start--;
+            } while (delete_start > 0 && (buf[delete_start] & 0xC0) == 0x80);
+
+            buf.erase(delete_start, edit_pos - delete_start);
+            edit_pos = delete_start;
+            redisplay();
+        }
     }
 
     // main_lop
@@ -544,9 +563,16 @@ class Shell {
     }
 };
 
+void handle_sigint(int sig, Shell* shell) {
+    std::cout << "type ^C\n";
+    shell->buf.clear(), shell->edit_pos = 0;
+    shell->redisplay();
+}
+
 int main() {
     HistoryManager hist;
     Shell shell(hist);
+    // signal(SIGINT, handle_sigint);
     shell.run();
     return 0;
 }
