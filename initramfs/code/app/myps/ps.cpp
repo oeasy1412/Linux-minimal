@@ -61,7 +61,7 @@ string getCurrentTerminal() {
     char* tty = ttyname(STDIN_FILENO);
     if (tty != nullptr) {
         string tty_str(tty);
-        // 提取最后部分 (如 "/dev/pts/0" -> "pts/0")
+        // 提取tty信息 (如 "/dev/pts/0" -> "pts/0")
         size_t pos = tty_str.find('/', 2);
         if (pos != string::npos) {
             return tty_str.substr(pos + 1);
@@ -140,7 +140,13 @@ bool parseProcStat(pid_t pid, ProcessInfo& info) {
             unsigned minor = tty_nr & 0xFF;
             ostringstream tty_ss;
             if (major == 4) {
-                tty_ss << "tty" << minor;
+                if (minor <= 63) {
+                    tty_ss << "tty" << minor;
+                } else if (minor <= 255) {
+                    tty_ss << "ttyS" << (minor - 64);
+                } else {
+                    tty_ss << "tty?" << minor;
+                }
             } else if (major == 5) {
                 tty_ss << "pts/" << minor;
             } else if (major == 136 || major == 137) {

@@ -52,7 +52,10 @@ $(TARGET): $(OBJS)
 	$(LD) $(LDFLAGS) $< -o $@
 
 
-.PHONY: default build build-app initramfs run run-nographic clean info help
+.PHONY: default build build-app initramfs 
+.PHONY: run run-nographic run-bridge debug
+.PHONY: clean info help
+
 default: build
 build: build-app initramfs
 
@@ -72,21 +75,37 @@ initramfs: $(TARGET)
 	@echo "===== initramfs 已成功生成至 $(BUILD_DIR)/initramfs.cpio.gz ====="
 
 run:
-	@qemu-system-x86_64 \
-	  -display gtk \
-	  -m 128 \
-	  -kernel vmlinuz \
-	  -initrd build/initramfs.cpio.gz \
-	  -append "console=ttyS0 quiet acpi=off"
+	sh -c "bash ./tools/run-qemu.sh --display window"
 
 run-nographic:
-	@qemu-system-x86_64 \
-	  -nographic \
-	  -serial mon:stdio \
-	  -m 128 \
-	  -kernel vmlinuz \
-	  -initrd build/initramfs.cpio.gz \
-	  -append "console=ttyS0 quiet acpi=off"
+	sh -c "bash ./tools/run-qemu.sh --display nographic"
+
+run-bridge:
+	@if ip link show type bridge br0 >/dev/null 2>&1; then \
+		echo "[SUCCESS] 网桥 br0 已存在"; \
+	else \
+		echo "[INFO] 网桥 br0 不存在, 正在创建..."; \
+		$(MAKE) bridge; \
+		if ! ip link show type bridge br0 >/dev/null 2>&1; then \
+            echo "[FATAL] 网桥 br0 创建失败！"; \
+            exit 1; \
+        fi; \
+		echo "[SUCCESS] 网桥 br0 创建成功"; \
+		sleep 3; \
+	fi
+	sudo sh -c "bash ./tools/run-qemu.sh --display nographic --bridge"
+
+# # sudo ln ~/linux/vmlinuz_debug ~/path/to/Linux-minimal/vmlinuz_my4debug-ln
+# gdb vmlinuz_my4debug-ln -ex 'target remote localhost:1234'
+# (gdb) info r # CPU RESET
+# (gdb) b *0x1000000
+debug:
+	sh -c "bash ./tools/run-qemu.sh --display nographic --debug"
+
+bridge:
+	sudo ./tools/bridge-setup.sh
+bridge-clean:
+	sudo ./tools/bridge-clean.sh
 
 clean:
 	@echo "===== 清理构建目录 ====="
@@ -97,6 +116,8 @@ clean:
 			$(MAKE) -C $(APP_SRC_DIR)/$$app clean APP_BUILD_BIN=../../../$(APP_BUILD_BIN); \
 		fi \
 	done
+	@echo "===== 清理网桥 ====="
+	${MAKE} bridge-clean
 	@echo "===== 清理完成 ====="
 
 info: 
@@ -107,8 +128,10 @@ help:
 	@echo "  make build                等同于 make build-app && make initramfs (当前shell: $(MYSHELL_SRC_DIR))"
 	@echo "  make MYSHELL=myshell      使用C-nostdlib myshell编译"
 	@echo "  make MYSHELL=myshell-cpp  使用C++        myshell编译"
-	@echo "  make build-app            构建应用程序"
+	@echo "  make build-app            不编译initramfs，构建应用程序"
 	@echo "  make initramfs            构建初始化内存盘"
 	@echo "  make run                  启动 QEMU (有图形界面)"
 	@echo "  make run-nographic        启动 QEMU (无图形界面)"
-	@echo "  make clean                清理构建文件"
+	@echo "  make run-bridge           检测并创建 br0 网桥后启动 QEMU"
+	@echo "  make debug                启动 QEMU 内核调试模式"
+	@echo "  make clean                清理构建文件"	

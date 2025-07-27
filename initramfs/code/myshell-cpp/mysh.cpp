@@ -222,11 +222,14 @@ class Shell {
     typename std::list<HistoryManager::Node*>::iterator history_pos;
 
   public:
-    explicit Shell(HistoryManager& hist) : history(hist) {}
+    explicit Shell(HistoryManager& hist) : history(hist) { setpgid(0, 0); }
     void run() {
         setup_environment();
         main_loop();
     }
+
+    static Shell* instance;
+    static void sigint_handler(int sig);
 
   private:
     // PATH
@@ -563,16 +566,25 @@ class Shell {
     }
 };
 
-void handle_sigint(int sig, Shell* shell) {
-    std::cout << "type ^C\n";
-    shell->buf.clear(), shell->edit_pos = 0;
-    shell->redisplay();
+Shell* Shell::instance = nullptr;
+
+void Shell::sigint_handler(int sig) {
+    if (instance) {
+        std::cout << "\n";
+        instance->buf.clear();
+        instance->edit_pos = 0;
+        instance->redisplay();
+    }
 }
 
 int main() {
     HistoryManager hist;
     Shell shell(hist);
-    // signal(SIGINT, handle_sigint);
+    Shell::instance = &shell;
+    signal(SIGINT, Shell::sigint_handler);
+    signal(SIGTSTP, SIG_IGN);
+    signal(SIGQUIT, SIG_IGN);
     shell.run();
+    Shell::instance = nullptr;
     return 0;
 }
