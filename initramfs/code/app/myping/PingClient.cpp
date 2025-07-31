@@ -283,7 +283,7 @@ bool PingClient::parse_arguments(int argc, char* argv[]) {
                 fprintf(stderr, "Option -W requires an argument\n");
                 return false;
             }
-            timeout = atof(optarg);
+            timeout = atof(optarg) * 1000.0;
             if (timeout <= 0) {
                 fprintf(stderr, "Timeout must be a positive number\n");
                 return false;

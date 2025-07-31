@@ -80,6 +80,9 @@ run:
 run-nographic:
 	sh -c "bash ./tools/run-qemu.sh --display nographic"
 
+run-user:
+	sh -c "bash ./tools/run-qemu.sh --display nographic --user"
+
 run-bridge:
 	@if ip link show type bridge br0 >/dev/null 2>&1; then \
 		echo "[SUCCESS] 网桥 br0 已存在"; \

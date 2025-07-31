@@ -85,15 +85,7 @@ void print_tree(const fs::path& path, const Config& config, int current_level = 
             } else {
                 std::cout << name;
             }
-            if (fs::is_directory(entry.status())) {
-                std::cout << "/"; // 目录标记
-                stats.dirs++;
-                std::cout << std::endl;
-                if (current_level < config.max_level) {
-                    std::string new_prefix = prefix + (is_last ? "    " : "│   ");
-                    print_tree(entry, config, current_level + 1, new_prefix);
-                }
-            } else if (fs::is_symlink(entry.status())) {
+            if (fs::is_symlink(entry.path())) {
                 std::cout << " -> ";
                 try {
                     auto target = fs::read_symlink(entry.path());
@@ -108,6 +100,14 @@ void print_tree(const fs::path& path, const Config& config, int current_level = 
                 }
                 stats.files++;
                 std::cout << std::endl;
+            } else if (fs::is_directory(entry.path())) {
+                std::cout << "/"; // 目录标记
+                stats.dirs++;
+                std::cout << std::endl;
+                if (current_level < config.max_level) {
+                    std::string new_prefix = prefix + (is_last ? "    " : "│   ");
+                    print_tree(entry, config, current_level + 1, new_prefix);
+                }
             } else {
                 stats.files++;
                 std::cout << std::endl;

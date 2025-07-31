@@ -108,7 +108,7 @@ class HistoryManager {
     }
 
     // 获取历史记录（按时间倒序）
-    std::vector<std::string> get_history(size_t limit = 10) const {
+    std::vector<std::string> get_history(size_t limit = 100) const {
         std::vector<std::string> result;
         result.reserve(limit);
         for (auto node = lru_list.begin(); node != lru_list.end() && limit-- > 0; ++node) {
