@@ -1,0 +1,177 @@
+#!/bin/busybox sh
+
+# 启用错误检查和安全模式
+set -eo pipefail
+
+# 初始化常量声明
+readonly PROGRESS_LENGTH=12
+readonly DELAY=0.3
+readonly BOLD='\033[1m'
+readonly GREEN='\033[32m'
+readonly YELLOW='\033[33m'
+readonly RESET='\033[0m'
+
+# 进度条函数（更高效的实现）
+show_progress() {
+    # 隐藏光标
+    echo -ne "\033[?25l"
+    local i filled empty
+    i=1
+    bars="🕐 🕑 🕒 🕓 🕔 🕕 🕖 🕗 🕘 🕙 🕚 🕛"
+    # bars="- \ | /"  # ASCII回退
+    # while [ $i -le $PROGRESS_LENGTH ]; do
+    for emoji in $bars; do
+        filled=$(/bin/busybox printf "%-${i}s" | /bin/busybox tr ' ' '=')
+        empty=$((PROGRESS_LENGTH - i))
+        /bin/busybox printf "\r⏳Initializing system... [${GREEN}%s>${RESET}%-${empty}s]%s " "$filled" "" "$emoji"
+        
+        /bin/busybox sleep "$DELAY"
+        i=$((i + 1))
+    done
+    # 显示光标
+    echo -ne "\033[?25h"
+}
+
+# === 系统初始化 === 
+init_system() {
+    # 启动进度条动画
+    show_progress
+
+    # 挂载虚拟文件系统
+    mount -t proc proc /proc
+    mount -t sysfs sysfs /sys
+    mount -t devtmpfs devtmpfs /dev
+    mount -t tmpfs tmpfs /run
+
+    # 初始化基础设备
+    mknod /dev/console c 5 1 2>/dev/null || true
+    mknod /dev/null c 1 3 2>/dev/null || true
+    mknod /dev/random c 1 8 2>/dev/null || true
+    mknod /dev/urandom c 1 9 2>/dev/null || true
+
+    # 创建基础系统文件
+    if [ ! -f /etc/passwd ]; then
+        echo "root:x:0:0:root:/root:/bin/sh" > /etc/passwd
+        echo "root:x:0:" > /etc/group
+        chmod 644 /etc/passwd /etc/group
+    fi
+    # 设置时区
+    if [ ! -f /etc/timezone ]; then
+        echo "Asia/Shanghai" > /etc/timezone
+        if [ -f /usr/share/zoneinfo/Asia/Shanghai ]; then
+            ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+        fi
+    fi
+
+    # 设置环境变量
+    export PATH="/sbin:/bin:/usr/sbin:/usr/bin"
+    export PS1="(linux-minimal) $ "
+    export TERM=linux
+
+    # 停止进度条动画
+    # kill -TERM $progress_pid 2>/dev/null
+    # wait $progress_pid 2>/dev/null
+}
+
+# === 网络初始化开始 ===
+init_network() {
+    echo "Initializing network..."
+    mkdir -p /lib/modules/$(uname -r) /etc/iproute2
+
+    ip addr add 127.0.0.1/8 dev lo scope host
+    ip link set lo up
+    VM_IP=172.20.192.100/24
+    BridgeIP=172.20.192.1
+    BridgeSeg=172.20.192.0/24
+
+    # 检测第一个可用物理网卡
+    sleep 1
+    INTERFACE=""
+    for dev in /sys/class/net/*; do
+        dev_name=${dev##*/}
+        [ "$dev_name" = "lo" ] && continue
+        [ -f "$dev/device/uevent" ] && INTERFACE=$dev_name && break
+    done
+    if [ -n "$INTERFACE" ]; then
+        echo "Found active network interface: ${INTERFACE}"
+        # 启用网卡
+        ip link set ${INTERFACE} up
+        # 检测IP是否已经配置
+        if ! ip addr show ${INTERFACE} | grep -q 'inet '; then
+            for param in $(cat /proc/cmdline); do
+                case $param in
+                    NET_MODE=*)
+                        NET_MODE="${param#*=}" ;;
+                esac
+            done
+            [ -z "${NET_MODE}" ] && NET_MODE="user"
+            echo "\$NET_MODE=${NET_MODE}"
+            case $NET_MODE in
+                bridge)
+                    ip addr add ${VM_IP} dev ${INTERFACE}
+                    ip route add default via ${BridgeIP} dev ${INTERFACE}
+                    ;;
+                user)
+                    # udhcpc -i ${INTERFACE} -nq;
+                    SLIRP_IP=10.0.2.15/24
+                    SLIRP_GATEWAY=10.0.2.2
+                    ip addr add ${SLIRP_IP} dev ${INTERFACE}
+                    ip route add default via ${SLIRP_GATEWAY} dev ${INTERFACE}
+                    # 配置自定义路由表
+                    echo "200 custom" >> /etc/iproute2/rt_tables
+                    ip addr add ${VM_IP} dev ${INTERFACE}
+                    ip route add ${BridgeSeg} dev ${INTERFACE} table custom
+                    ip route add default via ${BridgeIP} dev ${INTERFACE} table custom
+                    # 添加自定义策略路由规则
+                    ip rule add from ${VM_IP} table custom
+                    ip rule add to ${BridgeSeg} table custom
+                    ip rule add to ${BridgeIP} table custom
+                    ;;
+            esac
+        fi
+        # 创建DNS配置文件
+        if [ ! -f /etc/resolv.conf ]; then
+            echo "nameserver 8.8.8.8" > /etc/resolv.conf
+            echo "nameserver 8.8.4.4" >> /etc/resolv.conf
+        fi
+        if [ ! -f /etc/nsswitch.conf ]; then
+            echo "hosts:          files dns" > /etc/nsswitch.conf
+        fi
+        # 简单网络测试
+        ping -c 1 -W 1 127.0.0.1 >/dev/null && echo "Loopback OK" || echo "Loopback fail"
+        ping -c 1 -W 1 ${BridgeIP} >/dev/null && echo "Bridge OK" || echo "Bridge fail"
+        timeout 1 nslookup bilibili.com >/dev/null && echo "DNS OK" || echo "DNS fail"
+        if [ ! -f /var/www ]; then
+            mkdir -p /var/www
+            echo "Hello! Here is Linux-minimal." > /var/www/index.html
+        fi
+        httpd -p 80 -h /var/www
+        sh -c "nc -lvp 2233 -e /bin/mysh &"
+    else
+        echo "Warning: No physical network interface found!"
+    fi
+}
+
+# 主启动流程
+main() {
+    # 系统、网络初始化
+    init_system
+    init_network
+    # 临时查看info信息
+    sleep 1
+
+    # 显示欢迎信息
+    clear
+    printf "${BOLD}Welcome to ${GREEN}linux-minimal${RESET}${BOLD}, "
+    printf "you are ${YELLOW}%s${RESET}${BOLD} user.\n${RESET}" "$(whoami)"
+    /bin/busybox uname -a
+
+    # myshell，启动！
+    setsid cttyhack /bin/mysh
+}
+
+# 执行主函数
+main "$@"
+
+# # mount
+# # du -hk / | sort -nr | head -n 8

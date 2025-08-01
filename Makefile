@@ -25,11 +25,11 @@ endif
 DEPFLAGS = -MT $@ -MMD -MP -MF $(OBJ_DIR)/$*.d
 
 # 路径配置
-SRC_DIR  := initramfs/code
-BIN_DIR  := initramfs/bin
-OBJ_DIR  := initramfs/code/obj
+SRC_DIR  := usr-code
+BIN_DIR  := rootfs/bin
+OBJ_DIR  := usr-code/obj
 BUILD_DIR := build
-APP_SRC_DIR := initramfs/code/app
+APP_SRC_DIR := usr-code/app
 include config.cfg
 
 # 目标文件
@@ -75,13 +75,13 @@ initramfs: $(TARGET)
 	@echo "===== initramfs 已成功生成至 $(BUILD_DIR)/initramfs.cpio.gz ====="
 
 run:
-	sh -c "bash ./tools/run-qemu.sh --display window"
+	sh -c "bash ./tools/run-qemu.sh --display window --ext4"
 
 run-nographic:
-	sh -c "bash ./tools/run-qemu.sh --display nographic"
+	sh -c "bash ./tools/run-qemu.sh --display nographic --ext4"
 
 run-user:
-	sh -c "bash ./tools/run-qemu.sh --display nographic --user"
+	sh -c "bash ./tools/run-qemu.sh --display nographic --user --ext4"
 
 run-bridge:
 	@if ip link show type bridge br0 >/dev/null 2>&1; then \
@@ -96,14 +96,14 @@ run-bridge:
 		echo "[SUCCESS] 网桥 br0 创建成功"; \
 		sleep 3; \
 	fi
-	sudo sh -c "bash ./tools/run-qemu.sh --display nographic --bridge"
+	sudo sh -c "bash ./tools/run-qemu.sh --display nographic --bridge --ext4"
 
 # # sudo ln ~/linux/vmlinuz_debug ~/path/to/Linux-minimal/vmlinuz_my4debug-ln
 # gdb vmlinuz_my4debug-ln -ex 'target remote localhost:1234'
 # (gdb) info r # CPU RESET
 # (gdb) b *0x1000000
 debug:
-	sh -c "bash ./tools/run-qemu.sh --display nographic --debug"
+	sh -c "bash ./tools/run-qemu.sh --display nographic --ext4 --debug"
 
 bridge:
 	sudo ./tools/bridge-setup.sh
