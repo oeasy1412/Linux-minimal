@@ -52,7 +52,7 @@ while true;do
         QEMU_DEVICES+=" -drive file=${QEMU_DISK_IMAGE},format=raw,id=disk0,if=none "
         QEMU_DEVICES+=" -device ide-hd,drive=disk0 "
         # QEMU_DEVICES+=" -device virtio-blk-pci,drive=disk0 "
-        APPEND_PARAMS+=" root=/dev/sda init=/init "
+        APPEND_PARAMS+=" root=/dev/sda2 init=/init "
         shift 1;;
         *) break
       esac
@@ -62,21 +62,52 @@ QEMU_ARGUMENT+=" -append '${APPEND_PARAMS}' "
 QEMU_ARGUMENT+=" -D ../qemu.log "
 
 TMP_LOOP_DEVICE=""
+EFI_MNT="mnt/p1"
+ROOT_MNT="mnt/p2"
 
 mount_disk_image() {
+    local MOUNT=$1
     echo "正在挂载磁盘镜像..."
     TMP_LOOP_DEVICE=$(sudo losetup -f --show -P ${QEMU_DISK_IMAGE}) || exit 1
+    sudo partprobe ${TMP_LOOP_DEVICE}
+    sleep 1
+    echo "loop设备: ${TMP_LOOP_DEVICE}"
     # 根据函数入参判断是否需要格式化磁盘镜像
-    if [ "$1" == "mnt" ]; then
-        mkdir -p mnt
-        sudo mount ${TMP_LOOP_DEVICE} mnt
+    if [ "${MOUNT}" == "mnt" ]; then
+        mkdir -p ${MOUNT}
+        # 遍历所有分区
+        for PART in "${TMP_LOOP_DEVICE}"p*; do
+            if [ -e "$PART" ]; then
+                PART_NUMBER="${PART##*p}"
+                MOUNT_DIR="mnt/p${PART_NUMBER}"
+                sudo mkdir -p "${MOUNT_DIR}"
+                sudo mount "$PART" "${MOUNT_DIR}"
+            else
+                echo "错误：分区设备 $PART 不存在 $BASE_DEV"
+                sudo losetup -d "${TMP_LOOP_DEVICE}"
+                exit 1
+            fi
+        done
     fi
     echo "挂载磁盘镜像完成"
 }
 umount_disk_image() {
+    local MOUNT=$1
     echo "正在卸载磁盘镜像..."
-    if [ "$1" == "mnt" ]; then
-        sudo umount mnt
+    if [ "${MOUNT}" == "mnt" ]; then
+        mkdir -p ${MOUNT}
+        # 遍历所有分区
+        for PART in "${TMP_LOOP_DEVICE}"p*; do
+            if [ -e "$PART" ]; then
+                PART_NUMBER="${PART##*p}"
+                MOUNT_DIR="mnt/p${PART_NUMBER}"
+                sudo umount "$PART" "${MOUNT_DIR}"
+            else
+                echo "错误：分区设备 $PART 不存在"
+                sudo losetup -d "${TMP_LOOP_DEVICE}"
+                exit 1
+            fi
+        done
     fi
     sudo losetup -d ${TMP_LOOP_DEVICE} || (echo "卸载磁盘镜像失败" && exit 1)
     echo "卸载磁盘镜像完成"
@@ -88,22 +119,38 @@ prepare_disk_image() {
     if [ ! -f ${QEMU_DISK_IMAGE} ]; then
         echo "正在创建磁盘镜像..."
         qemu-img create -f raw ${QEMU_DISK_IMAGE} 128M || (echo "创建磁盘镜像失败" && exit 1)
-        mkfs.ext4 ${QEMU_DISK_IMAGE}
 
-        mount_disk_image mnt
-        echo "loop device: ${TMP_LOOP_DEVICE}"
+        mount_disk_image
+        echo "创建分区表..."
+        sudo parted -s ${TMP_LOOP_DEVICE} mklabel gpt
+        sudo parted -s ${TMP_LOOP_DEVICE} mkpart EFI fat32 1MiB 16MiB
+        sudo parted -s ${TMP_LOOP_DEVICE} mkpart ROOT ext4 16MiB 100%
+        sudo parted -s ${TMP_LOOP_DEVICE} set 1 esp on  # 设置EFI系统分区标志
+
+        sudo partprobe ${TMP_LOOP_DEVICE}
+        sudo blockdev --rereadpt ${TMP_LOOP_DEVICE}
+        # sudo partx -v --update ${TMP_LOOP_DEVICE} || sudo partx -v --add ${TMP_LOOP_DEVICE}
+        sleep 1
 
         echo "正在格式化磁盘镜像..."
-        sudo mkdir -p mnt/{bin,sbin,usr,usr/bin,usr/sbin,etc,etc/init.d,lib,proc,sys,dev,run,var}
-        sudo cp initramfs/bin/busybox mnt/bin
-        sudo chroot mnt /bin/busybox --install -s
-        sudo chmod 755 mnt/bin/busybox
+        sudo mkfs.fat -F32 -n EFI ${TMP_LOOP_DEVICE}p1 || (echo "FAT32格式化失败")
+        sudo mkfs.ext4 -F ${TMP_LOOP_DEVICE}p2 || (echo "EXT4格式化失败")
+        mkdir -p mnt ${EFI_MNT} ${ROOT_MNT}
+        sudo mount ${TMP_LOOP_DEVICE}p1 ${EFI_MNT}
+        sudo mkdir -p ${EFI_MNT}/EFI ${EFI_MNT}/EFI/BOOT
+        sudo echo "fs0:\EFI\BOOT\bootx64.efi" > ${EFI_MNT}/startup.nsh
+        sudo mount ${TMP_LOOP_DEVICE}p2 ${ROOT_MNT}
+        sudo mkdir -p ${ROOT_MNT}/{bin,sbin,usr,usr/bin,usr/sbin,etc,etc/init.d,lib,proc,sys,dev,run,var}
+        sudo touch ${ROOT_MNT}/etc/fstab 
+        sudo cp initramfs/bin/busybox ${ROOT_MNT}/bin
+        sudo chroot ${ROOT_MNT} /bin/busybox --install -s
+        sudo chmod 755 ${ROOT_MNT}/bin/busybox
 
         umount_disk_image mnt
 
         echo "Successfully mkfs"
         chmod 777 ${QEMU_DISK_IMAGE}
-        echo "创建磁盘镜像完成"
+        echo "✅创建磁盘镜像完成"
     fi
     echo "磁盘镜像已经准备好"
 }
@@ -111,7 +158,7 @@ write_disk_image() {
     echo "正在写入磁盘镜像..."
     mount_disk_image mnt
 
-    sudo cp -r rootfs/* mnt/
+    sudo cp -r rootfs/* ${ROOT_MNT}
 
     umount_disk_image mnt
     echo "写入磁盘镜像完成"
@@ -128,4 +175,4 @@ main() {
     run_qemu
 }
 
-main
+main 

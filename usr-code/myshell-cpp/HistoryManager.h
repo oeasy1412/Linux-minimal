@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <list>
@@ -186,7 +187,7 @@ class HistoryManager {
         std::lock_guard<std::mutex> lock(mtx);
         try {
             // 使用低级fd确保原子写入
-            int fd = open(save_path.c_str(), O_WRONLY | O_CREAT , 0644);
+            int fd = open(save_path.c_str(), O_WRONLY | O_CREAT, 0644);
             if (fd == -1) {
                 if (errno != ENOENT) { // 文件不存在不是错误
                     throw std::runtime_error("无法打开临时文件: " + std::string(strerror(errno)));

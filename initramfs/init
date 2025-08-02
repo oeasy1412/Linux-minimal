@@ -72,7 +72,7 @@ if [ -n "$root" ]; then
     # 切换到根文件系统
     echo "Successfully mounted rootfs in read-write mode"
     # /bin/busybox sh # 调试 initramfs
-    mount --move /proc /mnt/proc
+    # mount --move /proc /mnt/proc
     # mount --move /sys /mnt/sys
     # mount --move /dev /mnt/dev
     cd /mnt

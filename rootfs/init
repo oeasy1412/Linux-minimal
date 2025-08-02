@@ -43,6 +43,17 @@ init_system() {
     mount -t devtmpfs devtmpfs /dev
     mount -t tmpfs tmpfs /run
 
+    mkdir -p mnt
+    for PART in /dev/sda*; do
+        if [ "$PART" == "/dev/sda" ] || [ "$PART" == "/dev/sda2" ]; then
+            continue
+        fi
+        num=${PART##*[a-z]}
+        MNT_DIR="/mnt/p$num"
+        mkdir -p $MNT_DIR
+        mount $PART $MNT_DIR
+    done
+
     # 初始化基础设备
     mknod /dev/console c 5 1 2>/dev/null || true
     mknod /dev/null c 1 3 2>/dev/null || true
