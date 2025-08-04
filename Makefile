@@ -75,13 +75,13 @@ initramfs: $(TARGET)
 	@echo "===== initramfs 已成功生成至 $(BUILD_DIR)/initramfs.cpio.gz ====="
 
 run:
-	sh -c "bash ./tools/run-qemu.sh --display window --ext4"
+	sh -c "bash ./tools/run-qemu.sh --display window --bios uefi --ext4"
 
 run-nographic:
-	sh -c "bash ./tools/run-qemu.sh --display nographic --ext4"
+	sh -c "bash ./tools/run-qemu.sh --display nographic --bios legacy --ext4"
 
 run-user:
-	sh -c "bash ./tools/run-qemu.sh --display nographic --user --ext4"
+	sh -c "bash ./tools/run-qemu.sh --display nographic --bios legacy --user --ext4"
 
 run-bridge:
 	@if ip link show type bridge br0 >/dev/null 2>&1; then \
@@ -96,7 +96,7 @@ run-bridge:
 		echo "[SUCCESS] 网桥 br0 创建成功"; \
 		sleep 3; \
 	fi
-	sudo sh -c "bash ./tools/run-qemu.sh --display nographic --bridge --ext4"
+	sudo sh -c "bash ./tools/run-qemu.sh --display nographic --bios legacy --bridge --ext4"
 
 # # sudo ln ~/linux/vmlinuz_debug ~/path/to/Linux-minimal/vmlinuz_my4debug-ln
 # gdb vmlinuz_my4debug-ln -ex 'target remote localhost:1234'

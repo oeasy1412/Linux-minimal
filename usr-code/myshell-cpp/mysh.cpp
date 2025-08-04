@@ -332,7 +332,8 @@ class Shell {
                 return;
             }
             switch (ch) {
-            case 0x7F | '\b': // Backspace
+            case 0x7F: // Backspace
+            case '\b':
                 handle_backspace();
                 break;
             case 0x1B: // ESC
