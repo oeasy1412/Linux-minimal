@@ -103,7 +103,7 @@ run-bridge:
 # (gdb) info r # CPU RESET
 # (gdb) b *0x1000000
 debug:
-	sh -c "bash ./tools/run-qemu.sh --display nographic --ext4 --debug"
+	sh -c "bash ./tools/run-qemu.sh --display window --bios legacy --ext4 --debug"
 
 bridge:
 	sudo ./tools/bridge-setup.sh

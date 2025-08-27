@@ -45,7 +45,7 @@ init_system() {
 
     mkdir -p mnt
     for PART in /dev/sda*; do
-        if [ "$PART" == "/dev/sda" ] || [ "$PART" == "/dev/sda2" ]; then
+        if [ "$PART" == "/dev/sda" ] || [ "$PART" == "/dev/sda1" ] || [ "$PART" == "/dev/sda3" ]; then
             continue
         fi
         num=${PART##*[a-z]}

@@ -14,7 +14,7 @@ APPEND_PARAMS=" console=ttyS0 quiet acpi=off "
 QEMU_NOGRAPHIC=false
 BIOS_TYPE=""
 TAP_DEV="tap0"
-CMDLINE="root=/dev/sda2 init=/init"
+CMDLINE="root=/dev/sda3 init=/init"
 
 while true;do
     case "$1" in
@@ -70,7 +70,7 @@ while true;do
   done
 
 if [ ${BIOS_TYPE} == "uefi" ] ;then
-    QEMU_ARGUMENT+=" -bios tools/arch/x86_64/EFI/OVMF-pure-efi.fd -boot order=d "
+    QEMU_ARGUMENT+=" -bios tools/arch/x86_64/EFI/OVMF-pure-efi.fd -boot order=c "
 elif [ ${BIOS_TYPE} == "legacy" ] ;then
     QEMU_ARGUMENT+="  "
 else
@@ -82,8 +82,8 @@ fi
 QEMU_ARGUMENT+=" -D ../qemu.log "
 
 TMP_LOOP_DEVICE=""
-EFI_MNT="mnt/p1"
-ROOT_MNT="mnt/p2"
+EFI_MNT="mnt/p3"
+ROOT_MNT="mnt/p3"
 
 mount_disk_image() {
     local MOUNT=$1
@@ -133,7 +133,7 @@ umount_disk_image() {
     echo "卸载磁盘镜像完成"
 }
 
-grub_cfg="
+grub_cfg_uefi="
 set timeout=7
 set default=0
 insmod efi_gop
@@ -146,7 +146,7 @@ insmod gfxterm gfxmenu
 insmod png jpeg
 terminal_output gfxterm
 set gfxmode=auto
-set theme0=(hd0,gpt1)/boot/grub/themes/vva/theme.txt
+set theme0=(hd0,gpt2)/EFI/BOOT/grub/themes/vva/theme.txt
 save_env theme0
 function load_theme {
     load_env
@@ -159,7 +159,7 @@ function load_theme {
 load_theme
 
 menuentry 'Linux-minimal OS' --class gnu --class os {
-    set root=(hd0,gpt2)
+    set root=(hd0,gpt3)
     linux /boot/vmlinuz ${CMDLINE} console=ttyS0 quiet acpi=off
     initrd /boot/initramfs.cpio.gz
 }
@@ -169,14 +169,14 @@ menuentry 'Poweroff' --hotkey=p {
 submenu 'Change Theme' --class themes --hotkey=t {
     load_theme
     menuentry 'Default Theme' {
-        set theme_cur=(hd0,gpt1)/boot/grub/themes/default/theme.txt
+        set theme_cur=(hd0,gpt2)/EFI/BOOT/grub/themes/default/theme.txt
         save_env theme_cur
-        configfile (hd0,gpt1)/EFI/BOOT/grub.cfg
+        configfile (hd0,gpt2)/EFI/BOOT/grub.cfg
     }
     menuentry 'VVA Theme' {
-        set theme_cur=(hd0,gpt1)/boot/grub/themes/vva/theme.txt
+        set theme_cur=(hd0,gpt2)/EFI/BOOT/grub/themes/vva/theme.txt
         save_env theme_cur
-        configfile (hd0,gpt1)/EFI/BOOT/grub.cfg
+        configfile (hd0,gpt2)/EFI/BOOT/grub.cfg
     }
 }
 submenu 'More Options' --hotkey=m {
@@ -189,6 +189,28 @@ submenu 'More Options' --hotkey=m {
     }
 }"
 
+grub_cfg_bios="
+set timeout=7
+set default=0
+insmod part_gpt
+insmod ext2
+insmod fat
+insmod gettext
+set lang=zh_CN
+terminal_output console
+menuentry 'Linux-minimal OS' {
+    set root=(hd0,gpt3)
+    linux /boot/vmlinuz ${CMDLINE} console=ttyS0 quiet acpi=off
+    initrd /boot/initramfs.cpio.gz
+}
+menuentry 'Poweroff' --hotkey=p {
+    halt
+}
+menuentry 'Reboot' --hotkey=r {
+    reboot
+}
+"
+
 prepare_disk_image() {
     # 如果磁盘镜像不存在，则创建磁盘镜像
     echo "正在准备磁盘镜像..."
@@ -199,9 +221,11 @@ prepare_disk_image() {
         mount_disk_image
         echo "创建分区表..."
         sudo parted -s ${TMP_LOOP_DEVICE} mklabel gpt
+        sudo parted -s ${TMP_LOOP_DEVICE} mkpart BIOSBOOT 1MiB 2MiB
+        sudo parted -s ${TMP_LOOP_DEVICE} set 1 bios_grub on
         sudo parted -s ${TMP_LOOP_DEVICE} mkpart EFI fat32 2MiB 35MiB
         sudo parted -s ${TMP_LOOP_DEVICE} mkpart ROOT ext4 36MiB 100%
-        sudo parted -s ${TMP_LOOP_DEVICE} set 1 esp on  # 设置EFI系统分区标志
+        sudo parted -s ${TMP_LOOP_DEVICE} set 2 esp on  # 设置EFI系统分区标志
 
         sudo partprobe ${TMP_LOOP_DEVICE}
         sudo udevadm settle --timeout=5
@@ -210,21 +234,24 @@ prepare_disk_image() {
         sleep 1
 
         echo "正在格式化磁盘镜像..."
-        sudo mkfs.fat -F 32 -n "UEFI" ${TMP_LOOP_DEVICE}p1 || (echo "FAT32格式化失败")
-        sudo mkfs.ext4 -F ${TMP_LOOP_DEVICE}p2 | grep "filesystem" || (echo "EXT4格式化失败")
+        sudo mkfs.fat -F 32 -n "UEFI" ${TMP_LOOP_DEVICE}p2 || (echo "FAT32格式化失败")
+        sudo mkfs.ext4 -F ${TMP_LOOP_DEVICE}p3 | grep "filesystem" || (echo "EXT4格式化失败")
         mkdir -p mnt ${EFI_MNT} ${ROOT_MNT}
-        sudo mount ${TMP_LOOP_DEVICE}p1 ${EFI_MNT}
-        sudo mkdir -p ${EFI_MNT}/EFI/BOOT ${EFI_MNT}/boot/
-        sudo grub-install --target=x86_64-efi --efi-directory=${EFI_MNT} --boot-directory=${EFI_MNT}/boot --bootloader-id=GRUB --removable \
-        --modules="part_gpt fat ext2 multiboot2 normal" --no-floppy --force ${TMP_LOOP_DEVICE}
+        sudo mount ${TMP_LOOP_DEVICE}p2 ${EFI_MNT}
+        sudo mkdir -p ${EFI_MNT}/EFI/BOOT ${EFI_MNT}/boot/grub
+        sudo grub-install --target=x86_64-efi --efi-directory=${EFI_MNT} --boot-directory=${EFI_MNT}/EFI/BOOT --removable \
+        --modules="part_gpt fat ext2 multiboot2 normal configfile" --no-floppy --force ${TMP_LOOP_DEVICE}
         ls ${EFI_MNT}/EFI/BOOT
-        # ROOT_UUID=$(sudo blkid -s PARTUUID -o value ${TMP_LOOP_DEVICE}p2)
+        # ROOT_UUID=$(sudo blkid -s PARTUUID -o value ${TMP_LOOP_DEVICE}p3)
         # grub_cfg=${grub_cfg//xxxxxx/$ROOT_UUID}
-        sudo echo "${grub_cfg}" | sudo tee ${EFI_MNT}/EFI/BOOT/grub.cfg
-        sudo mkdir -p ${EFI_MNT}/boot/grub/themes
-        sudo cp -r tools/grub/themes/* ${EFI_MNT}/boot/grub/themes
-        sudo mount ${TMP_LOOP_DEVICE}p2 ${ROOT_MNT}
+        sudo echo "${grub_cfg_uefi}" | sudo tee ${EFI_MNT}/EFI/BOOT/grub.cfg
+        # sudo echo "${grub_cfg_uefi}" | sudo tee ${EFI_MNT}/boot/grub/grub.cfg
+        sudo mkdir -p ${EFI_MNT}/EFI/BOOT/grub/themes
+        sudo cp -r tools/grub/themes/* ${EFI_MNT}/EFI/BOOT/grub/themes
+        sudo mount ${TMP_LOOP_DEVICE}p3 ${ROOT_MNT}
         sudo mkdir -p ${ROOT_MNT}/{bin,sbin,usr,usr/bin,usr/sbin,etc,etc/init.d,lib,proc,sys,dev,run,var,boot}
+        sudo grub-install --target=i386-pc --boot-directory=${ROOT_MNT}/boot --recheck --no-floppy ${TMP_LOOP_DEVICE}
+        sudo echo "${grub_cfg_bios}" | sudo tee ${ROOT_MNT}/boot/grub/grub.cfg
         sudo touch ${ROOT_MNT}/etc/fstab
         sudo cp vmlinuz ${ROOT_MNT}/boot/
         sudo cp build/initramfs.cpio.gz ${ROOT_MNT}/boot/
@@ -235,6 +262,13 @@ prepare_disk_image() {
         umount_disk_image mnt
 
         echo "Successfully mkfs"
+        # GRUB="tools/grub/asm"
+        # QEMU_DISK_IMAGE="build/rootfs.img"
+        # nasm -f bin ${GRUB}/boot.asm -o ${GRUB}/boot.bin
+        # nasm -f bin ${GRUB}/stage2.asm -o ${GRUB}/stage2.bin
+        # dd if=${GRUB}/boot.bin of=${QEMU_DISK_IMAGE} bs=446 count=1 conv=notrunc
+        # dd if=${GRUB}/stage2.bin of=${QEMU_DISK_IMAGE} bs=512 count=1 seek=34 conv=notrunc
+        # dd if=vmlinuz of=${QEMU_DISK_IMAGE} bs=512 count=21188 seek=1000 conv=notrunc
         chmod 777 ${QEMU_DISK_IMAGE}
         echo "✅创建磁盘镜像完成"
     fi
