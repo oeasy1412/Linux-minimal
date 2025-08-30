@@ -32,8 +32,8 @@
         }                                                                                                              \
     } while (0)
 
-static void sigcont_handler(int signum) {
-    printf("target received SIGCONT\n");
+static void sigcont_handler(int sig) {
+    printf("target received %d (%s)\n", sig, strsignal(sig));
     exit(EXIT_SUCCESS);
 }
 
@@ -94,7 +94,7 @@ void test_attach_detach() {
         // pause(); // 等待信号
         // 永远不会到达这里
         printf("target process resumed\n");
-        exit(EXIT_SUCCESS);
+        exit(EXIT_FAILURE);
     } else {
         // 给目标进程时间进入pause状态
         sleep(1);

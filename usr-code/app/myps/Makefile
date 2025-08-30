@@ -1,5 +1,5 @@
 SRC = $(wildcard *.c) $(wildcard *.cpp)
-TARGET = myps
+TARGET = $(APP_BUILD_BIN)/myps
 
 .PHONY: all clean install
 
@@ -7,10 +7,9 @@ all: $(TARGET)
 
 $(TARGET): $(SRC)
 	@g++ -g -O2 -static -std=c++17 -o $@ $^
-	@echo "$(TARGET) 构建完成"
+	@echo "\033[32m$(notdir $(TARGET)) 构建完成\033[0m"
 
 clean:
-	rm -f $(TARGET) $(APP_BUILD_BIN)/$(TARGET)
+	rm -f $(TARGET)
 
-install: $(TARGET)
-	mv $(TARGET) $(APP_BUILD_BIN)
+install: all

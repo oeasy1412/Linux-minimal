@@ -51,17 +51,23 @@ $(TARGET): $(OBJS)
 	@mkdir -p $(@D)
 	$(LD) $(LDFLAGS) $< -o $@
 
+MAKEFLAGS += --no-print-directory
 
-.PHONY: default build build-app initramfs 
+.PHONY: default build user initramfs 
 .PHONY: run run-nographic run-bridge debug
 .PHONY: clean info help
 
 default: build
-build: build-app initramfs
+build:
+	@mkdir -p $(BIN_DIR)
+	@$(MAKE) -j user initramfs
+	@echo "\033[32m===== 构建完成 =====\n\033[0m"
+build-order:
+	@mkdir -p $(BIN_DIR)
+	@$(MAKE) user initramfs
 
 # 安装应用程序 APP
-build-app: $(addprefix build-,$(PROJECTS))
-	@echo "===== 构建完成 =====\n"
+user: $(addprefix build-,$(PROJECTS))
 $(addprefix build-,$(PROJECTS)): build-%:
 	@echo "===== 构建项目：$* ====="
 	@$(MAKE) -C $(APP_SRC_DIR)/$* install APP_BUILD_BIN=../../../$(APP_BUILD_BIN)
@@ -128,10 +134,10 @@ info:
 
 help:
 	@echo "可用目标:"
-	@echo "  make build                等同于 make build-app && make initramfs (当前shell: $(MYSHELL_SRC_DIR))"
+	@echo "  make build                等同于 make user && make initramfs (当前shell: $(MYSHELL_SRC_DIR))"
 	@echo "  make MYSHELL=myshell      使用C-nostdlib myshell编译"
 	@echo "  make MYSHELL=myshell-cpp  使用C++        myshell编译"
-	@echo "  make build-app            不编译initramfs，构建应用程序"
+	@echo "  make user                 不编译initramfs，构建应用程序"
 	@echo "  make initramfs            构建初始化内存盘"
 	@echo "  make run                  启动 QEMU (有图形界面)"
 	@echo "  make run-nographic        启动 QEMU (无图形界面)"
