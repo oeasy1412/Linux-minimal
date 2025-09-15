@@ -73,9 +73,16 @@ init_system() {
             ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
         fi
     fi
+    # 动态链接的环境变量
+    if [ ! -f /etc/ld.so.conf ]; then
+        mkdir -p /etc/ld.so.conf.d
+        echo "include /etc/ld.so.conf.d/x86_64-linux-gnu.conf" > /etc/ld.so.conf
+        echo "/usr/lib/x86_64-linux-gnu" > /etc/ld.so.conf.d/x86_64-linux-gnu.conf
+    fi
 
     # 设置环境变量
     export PATH="/sbin:/bin:/usr/sbin:/usr/bin"
+    export LD_LIBRARY_PATH="/usr/lib:/usr/lib/x86_64-linux-gnu"
     export PS1="(linux-minimal) $ "
     export TERM=linux
 

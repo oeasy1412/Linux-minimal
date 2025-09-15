@@ -219,6 +219,7 @@ class Shell {
     std::string buf, temp_buf;
     size_t edit_pos = 0;
     int hist_index = -1;
+    bool last_key_was_tab = false;
     typename std::list<HistoryManager::Node*>::iterator history_pos;
 
   public:
@@ -307,7 +308,7 @@ class Shell {
             if (hist_index == -1) { // 首次按上键
                 temp_buf = buf;
             }
-            if (hist_index + 1 < hist_list.size()) {
+            if (hist_index + 1 < static_cast<int>(hist_list.size())) {
                 buf = hist_list[++hist_index];
             }
         } else {
@@ -325,16 +326,23 @@ class Shell {
     void process_input() {
         buf.clear();
         edit_pos = 0, hist_index = -1;
+        last_key_was_tab = false;
         bool brk = false;
         while (!brk) {
             char ch;
             if (read(STDIN_FILENO, &ch, 1) <= 0) {
                 return;
             }
+            if (ch != '\t') {
+                last_key_was_tab = false;
+            }
             switch (ch) {
             case 0x7F: // Backspace
             case '\b':
                 handle_backspace();
+                break;
+            case 0x17: // CTRL+W (向左删除单词)
+                handle_delete_word_left();
                 break;
             case 0x1B: // ESC
                 handle_escape_sequence();
@@ -343,7 +351,8 @@ class Shell {
                 handle_commit();
                 brk = true;
                 break;
-            case '\t':
+            case '\t': // Tab键
+                handle_tab_completion();
                 break;
             default:
                 if (isprint(ch)) {
@@ -392,69 +401,224 @@ class Shell {
         redisplay();
     }
     void handle_escape_sequence() {
-        char seq[2];
+        char seq[5];
         if (read(STDIN_FILENO, &seq[0], 1) <= 0)
             return;
-        if (read(STDIN_FILENO, &seq[1], 1) <= 0)
-            return;
-
         if (seq[0] == '[') {
-            switch (seq[1]) {
-            case 'A': // 上键
-                navigate_history(true);
-                break;
-            case 'B': // 下键
-                navigate_history(false);
-                break;
-            case 'C': // 右键
-                if (edit_pos < buf.size()) {
-                    edit_pos++;
+            if (read(STDIN_FILENO, &seq[1], 1) <= 0)
+                return;
+            if (seq[1] >= 'A' && seq[1] <= 'D') { // 简单箭头键
+                switch (seq[1]) {
+                case 'A': // 上键
+                    navigate_history(true);
+                    break;
+                case 'B': // 下键
+                    navigate_history(false);
+                    break;
+                case 'C': // 右键
+                    if (edit_pos < buf.size()) {
+                        edit_pos++;
+                    }
+                    break;
+                case 'D': // 左键
+                    if (edit_pos > 0) {
+                        edit_pos--;
+                    }
+                    break;
                 }
-                break;
-            case 'D': // 左键
-                if (edit_pos > 0) {
-                    edit_pos--;
+            } else if (seq[1] == '1') { // 可能是带修饰符的键
+                if (read(STDIN_FILENO, &seq[2], 3) == 3 && seq[2] == ';' && seq[3] == '5') {
+                    if (seq[4] == 'C') {
+                        handle_ctrl_right_arrow();
+                        return;
+                    } else if (seq[4] == 'D') {
+                        handle_ctrl_left_arrow();
+                        return;
+                    }
                 }
-                break;
-            case '3': // Delete键
-                char ch;
-                if (read(STDIN_FILENO, &ch, 1) == 1 && ch == '~')
-                    if (edit_pos >= 0 && edit_pos < buf.size())
+            } else if (seq[1] == '3') { // Delete键
+                if (read(STDIN_FILENO, &seq[2], 1) == 1 && seq[2] == '~') {
+                    if (edit_pos < buf.size()) {
                         buf.erase(edit_pos, 1);
+                    }
+                }
             }
-            redisplay();
+        } else if (seq[0] == 'd') { // 带修饰符的Delete
+            handle_delete_word_right();
+            return;
         }
+        redisplay();
     }
     void handle_commit() {
         if (!buf.empty()) {
             history.add_command(buf, current_prompt);
         }
     }
-    friend void handle_sigint(int sig, Shell* shell);
-    void handle_ctrl_left_arrow() { // UTF-8 感知的光标移动
-        if (edit_pos > 0) {
-            // 回退到上一个UTF-8字符的起始位置
-            do {
-                edit_pos--;
-            } while (edit_pos > 0 && (buf[edit_pos] & 0xC0) == 0x80);
-            redisplay();
+    // 查找最长公共前缀
+    static std::string find_longest_common_prefix(const std::vector<std::string>& strings) {
+        if (strings.empty())
+            return "";
+        std::string prefix = strings[0];
+        for (size_t i = 1; i < strings.size(); ++i) {
+            while (strings[i].rfind(prefix, 0) != 0) {
+                prefix = prefix.substr(0, prefix.length() - 1);
+                if (prefix.empty())
+                    return "";
+            }
         }
+        return prefix;
     }
-    void handle_ctrl_backspace() { // UTF-8 感知的删除
-        if (edit_pos > 0) {
-            size_t delete_start = edit_pos;
-            // 找到字符起始位置
-            do {
-                delete_start--;
-            } while (delete_start > 0 && (buf[delete_start] & 0xC0) == 0x80);
+    void handle_tab_completion() {
+        size_t cursor_pos = edit_pos;
+        size_t word_start = buf.rfind(' ', cursor_pos - 1);
+        word_start = (word_start == std::string::npos) ? 0 : word_start + 1;
+        std::string current_word = buf.substr(word_start, cursor_pos - word_start);
 
-            buf.erase(delete_start, edit_pos - delete_start);
-            edit_pos = delete_start;
-            redisplay();
+        std::vector<std::string> matches;
+        bool is_command = (buf.find(' ') == std::string::npos);
+        std::string dir_path = ".";
+        if (is_command) {
+            // 静态补全: 内建命令
+            if (std::string("cd").rfind(current_word, 0) == 0)
+                matches.push_back("cd");
+            if (std::string("exit").rfind(current_word, 0) == 0)
+                matches.push_back("exit");
+            // 动态补全: PATH中的可执行文件
+            for (const auto& dir : path_dirs) {
+                try {
+                    for (const auto& entry : fs::directory_iterator(dir)) {
+                        if (entry.is_regular_file() || entry.is_symlink()) {
+                            std::string filename = entry.path().filename().string();
+                            if (filename.rfind(current_word, 0) == 0) {
+                                if ((entry.status().permissions() & fs::perms::owner_exec) != fs::perms::none) {
+                                    if (std::find(matches.begin(), matches.end(), filename) == matches.end()) {
+                                        matches.push_back(filename);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (const fs::filesystem_error& e) { /* 忽略无法访问的目录 */
+                }
+            }
+        } else {
+            // 动态补全: 文件或目录路径
+            std::string base_name = current_word;
+            size_t slash_pos = current_word.rfind('/');
+            if (slash_pos != std::string::npos) {
+                dir_path = current_word.substr(0, slash_pos + 1);
+                base_name = current_word.substr(slash_pos + 1);
+            }
+            try {
+                for (const auto& entry : fs::directory_iterator(dir_path)) {
+                    std::string filename = entry.path().filename().string();
+                    if (filename.rfind(base_name, 0) == 0) {
+                        matches.push_back(filename);
+                    }
+                }
+            } catch (const fs::filesystem_error& e) { /* 忽略无效路径 */
+            }
         }
+
+        if (matches.empty()) {
+            redisplay();
+            return; // 没有匹配项
+        }
+        if (matches.size() == 1) {
+            // 唯一匹配
+            std::string completion = (dir_path == "." ? "" : dir_path) + matches[0];
+            if (fs::is_directory(completion)) {
+                completion += "/";
+            } else {
+                completion += " ";
+            }
+            buf.replace(word_start, current_word.length(), completion);
+            edit_pos = word_start + completion.length();
+        } else {
+            // 多重匹配
+            std::string common_prefix;
+            // 提取相对于补全开始点的真实前缀
+            size_t slash_pos = current_word.rfind('/');
+            if (slash_pos != std::string::npos) {
+                common_prefix = current_word.substr(0, slash_pos + 1);
+            }
+            common_prefix += find_longest_common_prefix(matches);
+            buf.replace(word_start, current_word.length(), common_prefix);
+            edit_pos = word_start + common_prefix.length();
+
+            // 如果是第二次按Tab，则显示所有选项
+            if (last_key_was_tab) {
+                std::cout << "\n";
+                for (const auto& match : matches) {
+                    std::cout << fs::path(match).filename().string() << "\t";
+                }
+                std::cout << "\n";
+            }
+        }
+        last_key_was_tab = true;
+        redisplay();
+    }
+    void handle_ctrl_right_arrow() {
+        while (edit_pos < buf.length() && !std::isspace(buf[edit_pos])) {
+            edit_pos++;
+        }
+        while (edit_pos < buf.length() && std::isspace(buf[edit_pos])) {
+            edit_pos++;
+        }
+        redisplay();
+    }
+    void handle_ctrl_left_arrow() {
+        // 如果光标不在开头
+        if (edit_pos > 0) {
+            // 先向左移动一格，以确保我们处理的是光标前的字符
+            edit_pos--;
+        }
+        while (edit_pos > 0 && std::isspace(buf[edit_pos])) {
+            edit_pos--;
+        }
+        while (edit_pos > 0 && !std::isspace(buf[edit_pos])) {
+            edit_pos--;
+        }
+        // 如果我们停在了一个空格上（意味着我们越过了一个单词），向右移动一格到单词的开头
+        if (edit_pos > 0 && std::isspace(buf[edit_pos])) {
+            edit_pos++;
+        }
+        redisplay();
+    }
+    void handle_delete_word_left() {
+        if (edit_pos == 0) {
+            redisplay();
+            return;
+        }
+        size_t original_pos = edit_pos;
+        edit_pos--;
+        while (edit_pos > 0 && std::isspace(buf[edit_pos])) {
+            edit_pos--;
+        }
+        while (edit_pos > 0 && !std::isspace(buf[edit_pos - 1])) {
+            edit_pos--;
+        }
+        buf.erase(edit_pos, original_pos - edit_pos);
+        redisplay();
+    }
+    void handle_delete_word_right() {
+        if (edit_pos >= buf.length()) {
+            redisplay();
+            return;
+        }
+        size_t original_pos = edit_pos;
+        size_t delete_end = edit_pos;
+        while (delete_end < buf.length() && !std::isspace(buf[delete_end])) {
+            delete_end++;
+        }
+        while (delete_end < buf.length() && std::isspace(buf[delete_end])) {
+            delete_end++;
+        }
+        buf.erase(original_pos, delete_end - original_pos);
+        redisplay();
     }
 
-    // main_lop
+    // main_loop
     void main_loop() {
         while (true) {
             enable_raw_mode();
@@ -571,10 +735,14 @@ Shell* Shell::instance = nullptr;
 
 void Shell::sigint_handler(int sig) {
     if (instance) {
-        std::cout << "\n";
-        instance->buf.clear();
-        instance->edit_pos = 0;
-        instance->redisplay();
+        switch (sig) {
+        case SIGINT:
+            std::cout << "\n";
+            instance->buf.clear();
+            instance->edit_pos = 0;
+            instance->redisplay();
+            break;
+        }
     }
 }
 

@@ -34,5 +34,6 @@
 .*
 /build
 mnt
-rootfs/bin
+rootfs/*
+!rootfs/init
 qemu.log
