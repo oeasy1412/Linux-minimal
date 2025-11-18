@@ -1,5 +1,5 @@
 # 用户指定的架构，默认使用 `x86_64`，可选 `x86_64`,`arm64`
-ARCH ?= arm64
+ARCH ?= x86_64
 VALID_ARCHS := x86_64 arm64
 ifneq ($(filter $(ARCH),$(VALID_ARCHS)),)
 ARCH := $(ARCH)
@@ -39,7 +39,7 @@ endif
 DEPFLAGS = -MT $@ -MMD -MP -MF $(OBJ_DIR)/$*.d
 
 # 路径配置
-BIN      := bin
+BINARY   := bin
 SRC_DIR  := usr-code
 BIN_DIR  := rootfs/bin
 OBJ_DIR  := usr-code/obj
@@ -91,7 +91,7 @@ $(addprefix build-,$(PROJECTS)): build-%:
 initramfs: $(TARGET)
 	@echo "===== 生成 initramfs (ARCH=$(ARCH)) ====="
 	@mkdir -p $(BUILD_DIR) initramfs/bin
-	@cp $(BIN)/busybox/busybox-$(ARCH) initramfs/bin/busybox
+	@cp $(BINARY)/busybox/busybox-$(ARCH) initramfs/bin/busybox
 	cd initramfs && find . -print0 | cpio --null -ov --format=newc | gzip -9 \
 	  > ../$(BUILD_DIR)/initramfs.cpio.gz
 	@echo "===== initramfs 已成功生成至 $(BUILD_DIR)/initramfs.cpio.gz ====="
@@ -118,14 +118,14 @@ run-bridge:
 		echo "[SUCCESS] 网桥 br0 创建成功"; \
 		sleep 3; \
 	fi
-	sudo sh -c "bash ./tools/run-qemu.sh --display nographic --bios legacy --bridge --ext4"
+	sudo sh -c "bash ./tools/run-qemu.sh --arch $(ARCH) --display nographic --bios legacy --bridge --ext4"
 
 # # sudo ln ~/linux/vmlinuz_debug ~/path/to/Linux-minimal/bin/vmlinuz/vmlinuz_my4debug-ln
 # gdb bin/vmlinuz/vmlinuz_my4debug-ln -ex 'target remote localhost:1234'
 # (gdb) info r # CPU RESET
 # (gdb) b *0x1000000
 debug:
-	sh -c "bash ./tools/run-qemu.sh --display nographic --ext4 --debug"
+	sh -c "bash ./tools/run-qemu.sh --arch $(ARCH) --display nographic --ext4 --debug"
 
 bridge:
 	sudo ./tools/bridge-setup.sh
@@ -148,7 +148,7 @@ clean:
 	@echo "===== 清理完成 ====="
 
 info: 
-	@echo "当前架构: $(ARCH)"
+	@echo "当前架构:  $(ARCH)"
 	@echo "当前shell: $(MYSHELL_SRC_DIR)"
 
 help:
@@ -163,3 +163,4 @@ help:
 	@echo "  make run-bridge           检测并创建 br0 网桥后启动 QEMU"
 	@echo "  make debug                启动 QEMU 内核调试模式"
 	@echo "  make clean                清理构建文件"	
+	@echo "  make ARCH=arm64 build && make ARCH=arm64 run-nographic  手动指定架构"

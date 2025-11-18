@@ -5,7 +5,7 @@ APPEND_PARAMS=""
 CMDLINE=""
 
 QEMU_DEVICES=""
-QEMU_DISK_IMAGE="build/rootfs.img"
+QEMU_DISK_IMAGE="build/disk.img"
 QEMU_SMP="2,cores=2,threads=1,sockets=1"
 QEMU_MEMORY="256M"
 QEMU_ARGUMENT=" -smp ${QEMU_SMP} -m ${QEMU_MEMORY} "
@@ -94,7 +94,7 @@ while true; do
 done
 
 if [ -z ${ARCH}]; then
-    echo "Error Not Found ARCH. please add --arch [option]"
+    echo "[Error] Not Found ARCH. please add --arch [option]"
     exit 1
 fi
 
