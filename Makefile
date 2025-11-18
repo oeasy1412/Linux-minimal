@@ -1,6 +1,20 @@
-# 用户指定的shell位置，默认使用 `myshell-cpp`
+# 用户指定的架构，默认使用 `x86_64`，可选 `x86_64`,`arm64`
+ARCH ?= arm64
+VALID_ARCHS := x86_64 arm64
+ifneq ($(filter $(ARCH),$(VALID_ARCHS)),)
+ARCH := $(ARCH)
+else
+$(error 无效的ARCH: $(ARCH). 可选项: x86_64 或 arm64)
+endif
+
+ifeq ($(ARCH), x86_64)
+  CROSS_COMPILE := 
+else ifeq ($(ARCH), arm64)
+  CROSS_COMPILE := aarch64-linux-gnu-
+endif
+
+# 用户指定的shell位置，默认使用 `myshell-cpp`，可选 `myshell-cpp`,`myshell`
 MYSHELL ?= myshell-cpp
-# MYSHELL ?= myshell # without libc
 
 # 验证目录有效性
 VALID_MYSHELLS := myshell myshell-cpp
@@ -12,19 +26,20 @@ endif
 
 # 根据shell类型配置工具链
 ifeq ($(MYSHELL),myshell)
-  CC       := gcc
-  LD       := ld
+  CXX      := $(CROSS_COMPILE)gcc
+  LD       := $(CROSS_COMPILE)ld
   CXXFLAGS := -g -O2 -ffreestanding -nostdlib -fno-exceptions -I.
   LDFLAGS  := 
 else
-  CC       := g++
-  LD       := g++
+  CXX      := $(CROSS_COMPILE)g++
+  LD       := $(CROSS_COMPILE)g++
   CXXFLAGS := -g -O2 -I.
   LDFLAGS  := -static
 endif
 DEPFLAGS = -MT $@ -MMD -MP -MF $(OBJ_DIR)/$*.d
 
 # 路径配置
+BIN      := bin
 SRC_DIR  := usr-code
 BIN_DIR  := rootfs/bin
 OBJ_DIR  := usr-code/obj
@@ -61,7 +76,7 @@ default: build
 build:
 	@mkdir -p $(BIN_DIR)
 	@$(MAKE) -j user initramfs
-	@echo "\033[32m===== 构建完成 =====\n\033[0m"
+	@echo "\033[32m===== 构建完成 (ARCH=$(ARCH)) =====\n\033[0m"
 build-order:
 	@mkdir -p $(BIN_DIR)
 	@$(MAKE) user initramfs
@@ -69,25 +84,26 @@ build-order:
 # 安装应用程序 APP
 user: $(addprefix build-,$(PROJECTS))
 $(addprefix build-,$(PROJECTS)): build-%:
-	@echo "===== 构建项目：$* ====="
-	@$(MAKE) -C $(APP_SRC_DIR)/$* install APP_BUILD_BIN=../../../$(APP_BUILD_BIN)
+	@echo "===== 构建项目：$* (ARCH=$(ARCH)) ====="
+	@$(MAKE) -C $(APP_SRC_DIR)/$* install APP_BUILD_BIN=../../../$(APP_BUILD_BIN) ARCH=$(ARCH)
 
 # 生成 initramfs
 initramfs: $(TARGET)
-	@echo "===== 生成 initramfs ====="
-	@mkdir -p $(BUILD_DIR)
+	@echo "===== 生成 initramfs (ARCH=$(ARCH)) ====="
+	@mkdir -p $(BUILD_DIR) initramfs/bin
+	@cp $(BIN)/busybox/busybox-$(ARCH) initramfs/bin/busybox
 	cd initramfs && find . -print0 | cpio --null -ov --format=newc | gzip -9 \
 	  > ../$(BUILD_DIR)/initramfs.cpio.gz
 	@echo "===== initramfs 已成功生成至 $(BUILD_DIR)/initramfs.cpio.gz ====="
 
 run:
-	sh -c "bash ./tools/run-qemu.sh --display window --bios uefi --ext4"
+	sh -c "bash ./tools/run-qemu.sh --arch $(ARCH) --display window --bios uefi --ext4"
 
 run-nographic:
-	sh -c "bash ./tools/run-qemu.sh --display nographic --bios legacy --ext4"
+	sh -c "bash ./tools/run-qemu.sh --arch $(ARCH) --display nographic --bios legacy --ext4"
 
 run-user:
-	sh -c "bash ./tools/run-qemu.sh --display nographic --bios legacy --user --ext4"
+	sh -c "bash ./tools/run-qemu.sh --arch $(ARCH) --display nographic --bios legacy --user --ext4"
 
 run-bridge:
 	@if ip link show type bridge br0 >/dev/null 2>&1; then \
@@ -104,8 +120,8 @@ run-bridge:
 	fi
 	sudo sh -c "bash ./tools/run-qemu.sh --display nographic --bios legacy --bridge --ext4"
 
-# # sudo ln ~/linux/vmlinuz_debug ~/path/to/Linux-minimal/vmlinuz_my4debug-ln
-# gdb vmlinuz_my4debug-ln -ex 'target remote localhost:1234'
+# # sudo ln ~/linux/vmlinuz_debug ~/path/to/Linux-minimal/bin/vmlinuz/vmlinuz_my4debug-ln
+# gdb bin/vmlinuz/vmlinuz_my4debug-ln -ex 'target remote localhost:1234'
 # (gdb) info r # CPU RESET
 # (gdb) b *0x1000000
 debug:
@@ -121,20 +137,23 @@ clean:
 	@rm -rf $(OBJ_DIR) $(TARGET) $(BUILD_DIR)
 	@for app in $(PROJECTS); do \
 		echo "清理 $$app"; \
-		if [ -f $(BIN_DIR)/$$app ]; then \
+		actual_app=$$(echo "$$app" | sed 's|/|-|g'); \
+		echo $$actual_app; \
+		if [ -f $(BIN_DIR)/$$actual_app ]; then \
 			$(MAKE) -C $(APP_SRC_DIR)/$$app clean APP_BUILD_BIN=../../../$(APP_BUILD_BIN); \
 		fi \
 	done
 	@echo "===== 清理网桥 ====="
-	${MAKE} bridge-clean
+	$(MAKE) bridge-clean
 	@echo "===== 清理完成 ====="
 
 info: 
-	@echo "(当前shell: $(MYSHELL_SRC_DIR))"
+	@echo "当前架构: $(ARCH)"
+	@echo "当前shell: $(MYSHELL_SRC_DIR)"
 
 help:
 	@echo "可用目标:"
-	@echo "  make build                等同于 make user && make initramfs (当前shell: $(MYSHELL_SRC_DIR))"
+	@echo "  make build                等同于 make user && make initramfs (当前: ARCH=$(ARCH), SHELL=$(MYSHELL_SRC_DIR))"
 	@echo "  make MYSHELL=myshell      使用C-nostdlib myshell编译"
 	@echo "  make MYSHELL=myshell-cpp  使用C++        myshell编译"
 	@echo "  make user                 不编译initramfs，构建应用程序"

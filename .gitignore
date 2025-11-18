@@ -36,4 +36,5 @@
 mnt
 rootfs/*
 !rootfs/init
+initramfs/bin/*
 qemu.log

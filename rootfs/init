@@ -14,7 +14,7 @@ readonly RESET='\033[0m'
 # 进度条函数（更高效的实现）
 show_progress() {
     # 隐藏光标
-    echo -ne "\033[?25l"
+    /bin/busybox echo -ne "\033[?25l"
     local i filled empty
     i=1
     bars="🕐 🕑 🕒 🕓 🕔 🕕 🕖 🕗 🕘 🕙 🕚 🕛"
@@ -24,12 +24,11 @@ show_progress() {
         filled=$(/bin/busybox printf "%-${i}s" | /bin/busybox tr ' ' '=')
         empty=$((PROGRESS_LENGTH - i))
         /bin/busybox printf "\r⏳Initializing system... [${GREEN}%s>${RESET}%-${empty}s]%s " "$filled" "" "$emoji"
-        
         /bin/busybox sleep "$DELAY"
         i=$((i + 1))
     done
     # 显示光标
-    echo -ne "\033[?25h"
+    /bin/busybox echo -ne "\033[?25h"
 }
 
 # === 系统初始化 === 
@@ -37,15 +36,30 @@ init_system() {
     # 启动进度条动画
     show_progress
 
+    /bin/busybox --install -s
+
     # 挂载虚拟文件系统
     mount -t proc proc /proc
     mount -t sysfs sysfs /sys
     mount -t devtmpfs devtmpfs /dev
-    mount -t tmpfs tmpfs /run
+    # mount -t tmpfs tmpfs /run
+
+    for param in $(cat /proc/cmdline); do
+        case $param in
+            root=*)
+                ROOT_DEVICE="${param#*=}" ;;
+            NET_MODE=*)
+                NET_MODE="${param#*=}" ;;
+        esac
+    done
+
+    # # 加载设备驱动模块
+    # mkdir -p /lib/modules/$(uname -r)/kernel/drivers/misc
+    # insmod /drive/pipe.ko
 
     mkdir -p mnt
-    for PART in /dev/sda*; do
-        if [ "$PART" == "/dev/sda" ] || [ "$PART" == "/dev/sda2" ]; then
+    for PART in /dev/sda* /dev/vda*; do
+        if [ ! -b "$PART" ] || [ "$PART" == "/dev/sda" ] || [ "$PART" == "/dev/vda" ] || [ "$PART" == "$ROOT_DEVICE" ]; then
             continue
         fi
         num=${PART##*[a-z]}
@@ -95,9 +109,10 @@ init_system() {
 init_network() {
     echo "Initializing network..."
     mkdir -p /lib/modules/$(uname -r) /etc/iproute2
-
-    ip addr add 127.0.0.1/8 dev lo scope host
-    ip link set lo up
+    if ! ip addr show lo | grep -q "inet "; then
+        ip addr add 127.0.0.1/8 dev lo scope host
+        ip link set lo up
+    fi
     VM_IP=172.20.192.100/24
     BridgeIP=172.20.192.1
     BridgeSeg=172.20.192.0/24
@@ -115,13 +130,7 @@ init_network() {
         # 启用网卡
         ip link set ${INTERFACE} up
         # 检测IP是否已经配置
-        if ! ip addr show ${INTERFACE} | grep -q 'inet '; then
-            for param in $(cat /proc/cmdline); do
-                case $param in
-                    NET_MODE=*)
-                        NET_MODE="${param#*=}" ;;
-                esac
-            done
+        if ! ip addr show ${INTERFACE} | grep -q "inet "; then
             [ -z "${NET_MODE}" ] && NET_MODE="user"
             echo "\$NET_MODE=${NET_MODE}"
             case $NET_MODE in
@@ -136,10 +145,10 @@ init_network() {
                     ip addr add ${SLIRP_IP} dev ${INTERFACE}
                     ip route add default via ${SLIRP_GATEWAY} dev ${INTERFACE}
                     # 配置自定义路由表
-                    echo "200 custom" >> /etc/iproute2/rt_tables
+                    echo "200 custom" > /etc/iproute2/rt_tables
                     ip addr add ${VM_IP} dev ${INTERFACE}
-                    ip route add ${BridgeSeg} dev ${INTERFACE} table custom
-                    ip route add default via ${BridgeIP} dev ${INTERFACE} table custom
+                    ip route replace ${BridgeSeg} dev ${INTERFACE} table custom
+                    ip route replace default via ${BridgeIP} dev ${INTERFACE} table custom
                     # 添加自定义策略路由规则
                     ip rule add from ${VM_IP} table custom
                     ip rule add to ${BridgeSeg} table custom
@@ -163,10 +172,11 @@ init_network() {
             mkdir -p /var/www
             echo "Hello! Here is Linux-minimal." > /var/www/index.html
         fi
-        httpd -p 80 -h /var/www
+        # httpd -p 80 -h /var/www
         sh -c "nc -lvp 2233 -e /bin/mysh &"
     else
         echo "Warning: No physical network interface found!"
+        sleep 1
     fi
 }
 
@@ -185,7 +195,11 @@ main() {
     /bin/busybox uname -a
 
     # myshell，启动！
-    setsid cttyhack /bin/mysh
+    while true; do
+        setsid /bin/sh -c "exec /bin/mysh < /dev/console > /dev/console 2>&1"
+        echo "Shell exited. Respawning in 1 second..."
+        sleep 1
+    done
 }
 
 # 执行主函数

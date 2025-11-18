@@ -1,23 +1,43 @@
 #!/bin/bash
-ARCH="x86_64"
-QEMU=$(which qemu-system-${ARCH})
+ARCH=""
+# 需要根据架构调整的参数
+APPEND_PARAMS=""
+CMDLINE=""
 
 QEMU_DEVICES=""
 QEMU_DISK_IMAGE="build/rootfs.img"
 QEMU_SMP="2,cores=2,threads=1,sockets=1"
 QEMU_MEMORY="256M"
-QEMU_ARGUMENT=" "
-QEMU_ARGUMENT+=" -smp ${QEMU_SMP} -m ${QEMU_MEMORY} "
-APPEND_PARAMS=" console=ttyS0 quiet acpi=off "
+QEMU_ARGUMENT=" -smp ${QEMU_SMP} -m ${QEMU_MEMORY} "
 
 # 设置无图形界面模式
 QEMU_NOGRAPHIC=false
 BIOS_TYPE=""
 TAP_DEV="tap0"
-CMDLINE="root=/dev/sda2 init=/init"
 
-while true;do
+while true; do
     case "$1" in
+        --arch)
+        case "$2" in
+            x86_64)
+            ARCH="x86_64"
+            ;;
+            arm64)
+            ARCH="arm64"
+            ;;
+        esac;
+        KERNEL_IMAGE="bin/vmlinuz/vmlinuz-${ARCH}";
+        if [ ${ARCH} == "x86_64" ]; then
+            QEMU=$(which qemu-system-${ARCH})
+            APPEND_PARAMS=" console=ttyS0 quiet acpi=off  " # debug
+            CMDLINE="root=/dev/sda2 init=/init"
+        elif [ ${ARCH} == "arm64" ]; then
+            QEMU=$(which qemu-system-aarch64)
+            QEMU_ARGUMENT+=" -machine virt -cpu cortex-a57 -accel tcg,thread=multi "
+            APPEND_PARAMS=" console=ttyAMA0 quiet acpi=off  " # debug
+            CMDLINE="root=/dev/vda2 init=/init"
+        fi
+        shift 2;;
         --display)
         case "$2" in
             window)
@@ -26,7 +46,7 @@ while true;do
             nographic)
             QEMU_NOGRAPHIC=true
             QEMU_ARGUMENT+=" -nographic -serial mon:stdio "
-            QEMU_ARGUMENT+=" -kernel vmlinuz -initrd build/initramfs.cpio.gz "
+            QEMU_ARGUMENT+=" -kernel ${KERNEL_IMAGE} -initrd build/initramfs.cpio.gz "
             ;;
             vnc)
             QEMU_ARGUMENT+=" -display vnc=:00 "
@@ -42,7 +62,7 @@ while true;do
             ;;
         esac;shift 2;;
         --debug)
-        QEMU_ARGUMENT+=" -S -s "
+        QEMU_ARGUMENT+=" -S -gdb tcp::1234 "
         APPEND_PARAMS+=" nokaslr "
         shift 1;;
         --bridge)
@@ -61,17 +81,26 @@ while true;do
         shift 1;;
         --ext4)
         QEMU_DEVICES+=" -drive file=${QEMU_DISK_IMAGE},format=raw,id=disk0,if=none "
-        QEMU_DEVICES+=" -device ide-hd,drive=disk0 "
-        # QEMU_DEVICES+=" -device virtio-blk-pci,drive=disk0 "
+        if [ ${ARCH} == "x86_64" ]; then
+            QEMU_DEVICES+=" -device ide-hd,drive=disk0 "
+        elif [ ${ARCH} == "arm64" ]; then
+            QEMU_DEVICES+=" -device virtio-blk-device,drive=disk0 "
+            # QEMU_DEVICES+=" -device virtio-scsi-pci,id=scsi -device scsi-hd,drive=disk0 "
+        fi
         APPEND_PARAMS+=" ${CMDLINE} "
         shift 1;;
         *) break
-      esac
-  done
+    esac
+done
 
-if [ ${BIOS_TYPE} == "uefi" ] ;then
+if [ -z ${ARCH}]; then
+    echo "Error Not Found ARCH. please add --arch [option]"
+    exit 1
+fi
+
+if [ ${BIOS_TYPE} == "uefi" ]; then
     QEMU_ARGUMENT+=" -bios tools/arch/x86_64/EFI/OVMF-pure-efi.fd -boot order=d "
-elif [ ${BIOS_TYPE} == "legacy" ] ;then
+elif [ ${BIOS_TYPE} == "legacy" ]; then
     QEMU_ARGUMENT+="  "
 else
     echo "不支持的BIOS: ${BIOS_TYPE}"
@@ -160,7 +189,7 @@ load_theme
 
 menuentry 'Linux-minimal OS' --class gnu --class os {
     set root=(hd0,gpt2)
-    linux /boot/vmlinuz ${CMDLINE} console=ttyS0 quiet acpi=off
+    linux /boot/vmlinuz ${CMDLINE} ${APPEND_PARAMS}
     initrd /boot/initramfs.cpio.gz
 }
 menuentry 'Poweroff' --hotkey=p {
@@ -210,8 +239,8 @@ prepare_disk_image() {
         sleep 1
 
         echo "正在格式化磁盘镜像..."
-        sudo mkfs.fat -F 32 -n "UEFI" ${TMP_LOOP_DEVICE}p1 || (echo "FAT32格式化失败")
-        sudo mkfs.ext4 -F ${TMP_LOOP_DEVICE}p2 | grep "filesystem" || (echo "EXT4格式化失败")
+        sudo mkfs.fat -F 32 -n "UEFI" -i 0066CCFF ${TMP_LOOP_DEVICE}p1 || (echo "FAT32格式化失败")
+        sudo mkfs.ext4 -F -U aabbccdd-2024-0610-0666-ee000066ccff ${TMP_LOOP_DEVICE}p2 | grep "filesystem" || (echo "EXT4格式化失败")
         mkdir -p mnt ${EFI_MNT} ${ROOT_MNT}
         sudo mount ${TMP_LOOP_DEVICE}p1 ${EFI_MNT}
         sudo mkdir -p ${EFI_MNT}/EFI/BOOT ${EFI_MNT}/boot/
@@ -226,10 +255,9 @@ prepare_disk_image() {
         sudo mount ${TMP_LOOP_DEVICE}p2 ${ROOT_MNT}
         sudo mkdir -p ${ROOT_MNT}/{bin,sbin,usr,usr/bin,usr/sbin,etc,etc/init.d,lib,proc,sys,dev,run,var,boot}
         sudo touch ${ROOT_MNT}/etc/fstab
-        sudo cp vmlinuz ${ROOT_MNT}/boot/
+        sudo cp ${KERNEL_IMAGE} ${ROOT_MNT}/boot/vmlinuz
         sudo cp build/initramfs.cpio.gz ${ROOT_MNT}/boot/
         sudo cp initramfs/bin/busybox ${ROOT_MNT}/bin
-        sudo chroot ${ROOT_MNT} /bin/busybox --install -s
         sudo chmod 755 ${ROOT_MNT}/bin/busybox
 
         umount_disk_image mnt
@@ -252,6 +280,7 @@ write_disk_image() {
 }
 
 run_qemu() {
+    # echo "${QEMU} ${QEMU_ARGUMENT} ${QEMU_DEVICES}"
     sh -c "${QEMU} ${QEMU_ARGUMENT} ${QEMU_DEVICES}"
 }
 
