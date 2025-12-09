@@ -1,0 +1,16 @@
+name: Sync to CNB
+on:
+  push:
+    branches: [ master ] # 指定在推送到master分支时触发
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure Git and Push to CNB
+        run: |
+          git remote add cnb https://${{ secrets.CNB_USERNAME }}:${{ secrets.CNB_TOKEN }}@cnb.cool/aLinChe/Linux-minimal.git
+          git push cnb master:master --force

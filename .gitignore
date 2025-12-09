@@ -32,6 +32,7 @@
 *.app
 
 .*
+!/.github/**
 /build
 mnt
 rootfs/*

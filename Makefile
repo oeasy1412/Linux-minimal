@@ -68,7 +68,7 @@ $(TARGET): $(OBJS)
 
 MAKEFLAGS += --no-print-directory
 
-.PHONY: default build user initramfs 
+.PHONY: default build user initramfs make_diskimage 
 .PHONY: run run-nographic run-bridge debug
 .PHONY: clean info help
 
@@ -95,6 +95,9 @@ initramfs: $(TARGET)
 	cd initramfs && find . -print0 | cpio --null -ov --format=newc | gzip -9 \
 	  > ../$(BUILD_DIR)/initramfs.cpio.gz
 	@echo "===== initramfs 已成功生成至 $(BUILD_DIR)/initramfs.cpio.gz ====="
+
+make_diskimage: build
+	sh -c "bash ./tools/run-qemu.sh --arch $(ARCH) --make_diskimage"
 
 run:
 	sh -c "bash ./tools/run-qemu.sh --arch $(ARCH) --display window --bios uefi --ext4"

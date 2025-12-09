@@ -15,6 +15,8 @@ QEMU_NOGRAPHIC=false
 BIOS_TYPE=""
 TAP_DEV="tap0"
 
+ONLYMAKEIMAGE=false
+
 while true; do
     case "$1" in
         --arch)
@@ -89,6 +91,10 @@ while true; do
         fi
         APPEND_PARAMS+=" ${CMDLINE} "
         shift 1;;
+        --make_diskimage)
+        ONLYMAKEIMAGE=true
+        shift 1
+        break;;
         *) break
     esac
 done
@@ -290,5 +296,11 @@ main() {
     # sleep 3
     run_qemu
 }
+
+if [ ${ONLYMAKEIMAGE} == true ]; then
+    prepare_disk_image
+    write_disk_image
+    exit 0
+fi
 
 main 
