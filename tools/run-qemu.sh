@@ -1,4 +1,5 @@
 #!/bin/bash
+# bash run-qemu.sh --arch x86_64 --display nographic --bios legacy --ext4 --user --prebuilt # 使用CNB预构建镜像时使用的命令
 ARCH=""
 # 需要根据架构调整的参数
 APPEND_PARAMS=""
@@ -6,7 +7,7 @@ CMDLINE=""
 
 QEMU_DEVICES=""
 QEMU_DISK_IMAGE="build/disk.img"
-QEMU_SMP="2,cores=2,threads=1,sockets=1"
+QEMU_SMP="2,sockets=2,cores=1,threads=1"
 QEMU_MEMORY="256M"
 QEMU_ARGUMENT=" -smp ${QEMU_SMP} -m ${QEMU_MEMORY} "
 
@@ -16,6 +17,7 @@ BIOS_TYPE=""
 TAP_DEV="tap0"
 
 ONLYMAKEIMAGE=false
+PREBUILT=false
 
 while true; do
     case "$1" in
@@ -95,11 +97,14 @@ while true; do
         ONLYMAKEIMAGE=true
         shift 1
         break;;
+        --prebuilt)
+        PREBUILT=true
+        shift 1;;
         *) break
     esac
 done
 
-if [ -z ${ARCH}]; then
+if [ -z ${ARCH} ]; then
     echo "[Error] Not Found ARCH. please add --arch [option]"
     exit 1
 fi
@@ -300,6 +305,12 @@ main() {
 if [ ${ONLYMAKEIMAGE} == true ]; then
     prepare_disk_image
     write_disk_image
+    exit 0
+fi
+
+if [ ${PREBUILT} == true ]; then
+    echo "使用预构建磁盘镜像，跳过挂载步骤"
+    run_qemu
     exit 0
 fi
 
